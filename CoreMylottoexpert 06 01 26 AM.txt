@@ -29217,6 +29217,47 @@ if (!empty($__mleAdvCards)) {
     }
     unset($__mleBriefFullCard, $__mleBriefFullLid, $__mleBriefDidReplace, $__mleBriefSrcIdx, $__mleBriefSrcCard);
 }
+/* Top cards can come from selector summary payloads, so pending must be keyed by
+   lottery_id and not derived only from whichever full card is currently selected. */
+$__mlePendingByLotteryId = array();
+$__mlePendingScopeByLotteryId = array();
+$__mlePendingFullByLotteryId = array();
+foreach ((array)$__mleAdvCards as $__mlePendingFullCardRaw) {
+    $__mlePendingFullLid = (int)($__mlePendingFullCardRaw['lottery_id'] ?? 0);
+    if ($__mlePendingFullLid <= 0) { continue; }
+    $__mlePendingFullByLotteryId[$__mlePendingFullLid] = (array)$__mlePendingFullCardRaw;
+}
+foreach ((array)$__mleBriefSourceCards as $__mlePendingCardRaw) {
+    $__mlePendingLid = (int)($__mlePendingCardRaw['lottery_id'] ?? 0);
+    if ($__mlePendingLid <= 0) { continue; }
+    $__mlePendingScopeCard = (array)$__mlePendingCardRaw;
+    if (empty($__mlePendingScopeCard['game_id']) && !empty($__mlePendingFullByLotteryId[$__mlePendingLid]['game_id'])) {
+        $__mlePendingScopeCard['game_id'] = (string)$__mlePendingFullByLotteryId[$__mlePendingLid]['game_id'];
+    }
+    $____mlePendingScope = mylottoexpertResolveUpcomingDrawScope($__mlePendingScopeCard);
+    if (trim((string)($____mlePendingScope['date'] ?? '')) === '' && !empty($__mlePendingFullByLotteryId[$__mlePendingLid])) {
+        $____mlePendingScope = mylottoexpertResolveUpcomingDrawScope((array)$__mlePendingFullByLotteryId[$__mlePendingLid]);
+    }
+    $__mlePendingDate = trim((string)($____mlePendingScope['date'] ?? ''));
+    if ($__mlePendingDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mlePendingDate)) { continue; }
+    $__mlePendingDrawAt = trim((string)($____mlePendingScope['draw_at'] ?? ''));
+    $__mlePendingScopeCard['next_draw_date'] = $__mlePendingDate;
+    $__mlePendingScopeCard['target_draw_date'] = $__mlePendingDate;
+    if ($__mlePendingDrawAt !== '' && strncmp($__mlePendingDrawAt, '0000-00-00', 10) !== 0) {
+        $__mlePendingScopeCard['next_draw_at'] = $__mlePendingDrawAt;
+        $__mlePendingScopeCard['target_draw_at'] = $__mlePendingDrawAt;
+    }
+    $__mlePendingCount = null;
+    if (is_object($db) && (int)$workspaceUserId > 0) {
+        $__mlePendingCount = mylottoexpertDatabasePendingRunCount($db, $workspaceUserId, $__mlePendingScopeCard);
+    }
+    if ($__mlePendingCount === null) {
+        $__mlePendingCount = mylottoexpertCanonicalPendingRunCount($__mlePendingScopeCard);
+    }
+    $__mlePendingByLotteryId[$__mlePendingLid] = max(0, (int)$__mlePendingCount);
+    $__mlePendingScopeByLotteryId[$__mlePendingLid] = array('date'=>$__mlePendingDate, 'draw_at'=>$__mlePendingDrawAt);
+}
+unset($__mlePendingFullCardRaw, $__mlePendingFullLid, $__mlePendingCardRaw, $__mlePendingLid, $__mlePendingScopeCard, $____mlePendingScope, $__mlePendingDate, $__mlePendingDrawAt, $__mlePendingCount);
 foreach ((array)$__mleBriefSourceCards as $__briefCardRaw) {
     $__briefLid = (int)($__briefCardRaw['lottery_id'] ?? 0);
     if ($__briefLid <= 0) { continue; }
@@ -29235,10 +29276,23 @@ foreach ((array)$__mleBriefSourceCards as $__briefCardRaw) {
     $__briefMethodLabel = mleAdvisoryMethodLabel($__briefMethodKey);
     $__briefMethodRole = mleAdvisoryMethodRoleLabel($__briefMethodKey);
     $__briefMethodTrack = mleAdvisoryMethodTrackLabel($__briefMethodKey);
-    $__briefCardRaw = mylottoexpertSyncCardPendingCount((array)$__briefCardRaw, $db, $workspaceUserId);
+    if (isset($__mlePendingByLotteryId[$__briefLid])) {
+        $__briefPending = max(0, (int)$__mlePendingByLotteryId[$__briefLid]);
+        if (!isset($__briefCardRaw['prediction_summary']) || !is_array($__briefCardRaw['prediction_summary'])) {
+            $__briefCardRaw['prediction_summary'] = array();
+        }
+        if (!isset($__briefCardRaw['precision_progress']) || !is_array($__briefCardRaw['precision_progress'])) {
+            $__briefCardRaw['precision_progress'] = array();
+        }
+        $__briefCardRaw['prediction_summary']['pending_runs'] = $__briefPending;
+        $__briefCardRaw['precision_progress']['pending_runs'] = $__briefPending;
+        $__briefCardRaw['mle_canonical_pending_runs'] = $__briefPending;
+    } else {
+        $__briefCardRaw = mylottoexpertSyncCardPendingCount((array)$__briefCardRaw, $db, $workspaceUserId);
+        $__briefPending = mylottoexpertCanonicalPendingRunCount((array)$__briefCardRaw);
+    }
     $__briefSummary = (array)($__briefCardRaw['prediction_summary'] ?? array());
     $__briefVisual = (array)($__briefCardRaw['visual_runs'] ?? array('upcoming'=>array()));
-    $__briefPending = mylottoexpertCanonicalPendingRunCount((array)$__briefCardRaw);
 
     $__briefChecked = (int)($__briefSummary['scored_draws'] ?? ($__briefProgress['current_draw_cycles'] ?? ($__briefProgress['current_scored_runs'] ?? 0)));
     $__briefScored = (int)($__briefSummary['scored_runs'] ?? ($__briefSummary['scored_draws'] ?? ($__briefProgress['current_scored_runs'] ?? ($__briefStats['scored_runs'] ?? 0))));
