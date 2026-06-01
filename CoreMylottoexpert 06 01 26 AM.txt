@@ -24074,17 +24074,50 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
             $qn = function($name) use ($db) { return $db->quoteName((string)$name); };
 
             $where = array($qn('user_id') . ' = ' . (int)$userId);
-            $identity = array();
+            /* [[MLE_V5_EFFECTIVE_IDENTITY_2026_06_01]]
+               Normalized effective identity matching for multi-state lotteries.
+               effective_lottery_id = COALESCE(NULLIF(target_lottery_id,0), NULLIF(lottery_id,0), 0)
+               effective_game_id = LOWER(TRIM(COALESCE(NULLIF(target_game_id,''), NULLIF(game_id,''), '')))
+               lottery_id is always primary; game_id never excludes a row when lottery_id matches.
+               Fallback to effective game_id match only when card has no lottery_id. */
+            $__hasLotteryIdCol = $hasCol('lottery_id');
+            $__hasTargetLotteryIdCol = $hasCol('target_lottery_id');
+            $__hasGameIdCol = $hasCol('game_id');
+            $__hasTargetGameIdCol = $hasCol('target_game_id');
             if ($lotteryId > 0) {
-                if ($hasCol('lottery_id')) { $identity[] = $qn('lottery_id') . ' = ' . (int)$lotteryId; }
-                if ($hasCol('target_lottery_id')) { $identity[] = $qn('target_lottery_id') . ' = ' . (int)$lotteryId; }
+                $__effLotParts = array();
+                if ($__hasTargetLotteryIdCol) { $__effLotParts[] = 'NULLIF(' . $qn('target_lottery_id') . ', 0)'; }
+                if ($__hasLotteryIdCol)       { $__effLotParts[] = 'NULLIF(' . $qn('lottery_id') . ', 0)'; }
+                if (empty($__effLotParts)) { return null; }
+                $__effLotExpr = 'COALESCE(' . implode(', ', $__effLotParts) . ', 0)';
+                $where[] = '(' . $__effLotExpr . ' = ' . (int)$lotteryId . ')';
+                if (!isset($GLOBALS['__mle_pending_identity_diag'])) { $GLOBALS['__mle_pending_identity_diag'] = array(); }
+                $GLOBALS['__mle_pending_identity_diag'][] = array(
+                    'lottery_id'           => $lotteryId,
+                    'card_game_id'         => $gameId,
+                    'row_effective_game_id' => null,
+                    'pending_count'        => null,
+                    'identity_match_mode'  => 'lottery_primary',
+                );
+            } elseif ($gameId !== '') {
+                /* No lottery_id on card: fall back to effective game_id match only. */
+                $__effGameParts = array();
+                if ($__hasTargetGameIdCol) { $__effGameParts[] = "NULLIF(" . $qn('target_game_id') . ", '')"; }
+                if ($__hasGameIdCol)       { $__effGameParts[] = "NULLIF(" . $qn('game_id') . ", '')"; }
+                if (empty($__effGameParts)) { return null; }
+                $__effGameExpr = "LOWER(TRIM(COALESCE(" . implode(', ', $__effGameParts) . ", '')))";
+                $where[] = '(' . $__effGameExpr . ' = ' . $db->quote(strtolower(trim($gameId))) . ')';
+                if (!isset($GLOBALS['__mle_pending_identity_diag'])) { $GLOBALS['__mle_pending_identity_diag'] = array(); }
+                $GLOBALS['__mle_pending_identity_diag'][] = array(
+                    'lottery_id'           => $lotteryId,
+                    'card_game_id'         => $gameId,
+                    'row_effective_game_id' => null,
+                    'pending_count'        => null,
+                    'identity_match_mode'  => 'game_id_only',
+                );
+            } else {
+                return null;
             }
-            if ($gameId !== '') {
-                if ($hasCol('game_id')) { $identity[] = $qn('game_id') . ' = ' . $db->quote($gameId); }
-                if ($hasCol('target_game_id')) { $identity[] = $qn('target_game_id') . ' = ' . $db->quote($gameId); }
-            }
-            if (empty($identity)) { return null; }
-            $where[] = '(' . implode(' OR ', array_unique($identity)) . ')';
 
             $terminal = array('scored','evaluated','complete','completed','result_found','official_found','archived','cancelled','canceled','deleted','failed','void','quarantined');
             foreach (array('evaluation_status','status','play_status','score_status') as $statusCol) {
@@ -24151,6 +24184,10 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
             $query = 'SELECT ' . $idExpr . ' FROM ' . $db->quoteName($table) . ' WHERE ' . implode(' AND ', $where);
             $db->setQuery($query);
             $count = (int)$db->loadResult();
+            if (!empty($GLOBALS['__mle_pending_identity_diag'])) {
+                $__diagIdx = count($GLOBALS['__mle_pending_identity_diag']) - 1;
+                $GLOBALS['__mle_pending_identity_diag'][$__diagIdx]['pending_count'] = max(0, $count);
+            }
             return max(0, $count);
         } catch (\Throwable $e) {
             return null;
