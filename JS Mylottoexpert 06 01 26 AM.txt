@@ -215,6 +215,8 @@
     var card;
     var form;
     var regularScope;
+    var lotteryId;
+    var fallbackCard;
     if (!btn) { return null; }
     journey = closest(btn, '.mle-v38-user-journey');
     if (journey) {
@@ -238,6 +240,23 @@
       if (regularScope && regularScope.form) {
         form = regularScope.form;
         if (qs('input[name="mle_batch_plan"][value="regular_9_batch"], input[name="mle_batch_plan"][value="regular"], input[name="mle_batch_plan"][value="regular_skai_batch"]', form)) { return form; }
+      }
+      lotteryId = String(card.getAttribute('data-lottery-id') || btn.getAttribute('data-lottery-id') || '').replace(/[^0-9]/g, '');
+      if (!lotteryId) {
+        fallbackCard = closest(btn, '.mle-lottery-outer');
+        lotteryId = String((fallbackCard && fallbackCard.getAttribute('data-outer-lottery-id')) || '').replace(/[^0-9]/g, '');
+      }
+      if (lotteryId) {
+        fallbackCard = qs('.mle-advisory-card[data-lottery-id="' + lotteryId + '"], [data-mle-lottery-card][data-lottery-id="' + lotteryId + '"]', document);
+        if (fallbackCard) {
+          form = qs('form.mle-regular-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', fallbackCard);
+          if (form) { return form; }
+          regularScope = qs('form input[name="mle_action"][value="create_skai_batch"]', fallbackCard);
+          if (regularScope && regularScope.form) {
+            form = regularScope.form;
+            if (qs('input[name="mle_batch_plan"][value="regular_9_batch"], input[name="mle_batch_plan"][value="regular"], input[name="mle_batch_plan"][value="regular_skai_batch"]', form)) { return form; }
+          }
+        }
       }
     }
     return null;
