@@ -24152,7 +24152,7 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
             }
 
             $drawParts = array();
-            foreach (array('target_draw_date','next_draw_date','draw_date') as $drawCol) {
+            foreach (array('target_draw_date','next_draw_date','latest_draw_date','draw_date') as $drawCol) {
                 if ($hasCol($drawCol)) { $drawParts[] = 'NULLIF(' . $qn($drawCol) . ', ' . $db->quote('0000-00-00') . ')'; }
             }
             $drawExpr = !empty($drawParts) ? 'COALESCE(' . implode(',', $drawParts) . ')' : 'NULL';
@@ -24170,6 +24170,15 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
                 /* Exclude strategy_set rows (they are strategy/play-set records, not runs). */
                 if ($hasCol('source')) {
                     $where[] = '(LOWER(TRIM(' . $qn('source') . ")) <> 'strategy_set')";
+                }
+                /* prediction_archive is valid saved prediction data in production.
+                   Exclude only training/learning/system-only intents when present. */
+                if ($hasCol('save_intent')) {
+                    $where[] = '('
+                        . 'LOWER(TRIM(COALESCE(' . $qn('save_intent') . ",''))) NOT LIKE 'training%'"
+                        . " AND LOWER(TRIM(COALESCE(" . $qn('save_intent') . ",''))) NOT LIKE 'learning%'"
+                        . " AND LOWER(TRIM(COALESCE(" . $qn('save_intent') . ",''))) NOT LIKE 'system%'"
+                        . ')';
                 }
                 /* Require at least one saved-run identity marker so that bucket-summary
                    or advisory-aggregate rows without real run identity are excluded. */
