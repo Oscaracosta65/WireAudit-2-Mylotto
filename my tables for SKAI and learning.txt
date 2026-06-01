@@ -1,0 +1,655 @@
+	jos9d_mle_current_locked_settings :
+	
+Full texts
+	id 	user_id 	lottery_id 	lottery_name 	source 	method 	base_run_id 	base_settings_id 	settings_json 	locked_status 	recommendation_level 	precision_progress_level 	precision_lock_stage 	range_basis 	range_min 	range_max 	evidence_summary 	locked_reason 	repeated_cluster_key 	repeated_cluster_count 	completed_draw_count 	strong_evidence_count 	is_active 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	699 	527 	United States - Delaware - Multi-Win Lotto
+	skip_hit
+	skip_hit
+	17545 	17545 	{"label":"Multi-Win Lotto - 2026-05-03 13:02 [Pure...
+	Precision Lock Candidate
+	Learning Stage
+	Getting Started
+	broad_testing
+	Blend Setting
+	0.0000 	100.0000 	LottoExpert found 6 strong evidence runs for this ...
+	These settings have repeated cluster support acros...
+	method=mcmc|draws_analyzed=0|auto_tune=0|recency_d...
+	3 	3 	6 	1 	2026-05-08 13:49:53 	2026-05-08 13:49:53
+	
+	
+	jos9d_mle_duplicate_batch_quarantine_audit 	
+	
+Full texts
+	id 	batch_signature_hash 	detected_at 	last_seen_at 	severity 	user_id 	lottery_id 	game_id 	target_draw_date 	batch_key 	batch_uuid 	source_batch_id 	row_count 	unique_signature_count 	duplicate_ratio 	affected_saved_ids 	sample_signature 	reason 	action_taken 	action_taken_at 	action_taken_by 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	e34a420187611c7462929b085eb800e9e953c627d7d3a39e66...
+	2026-05-26 14:16:00 	2026-05-26 17:11:16 	warning
+	438 	82 	FLH
+	2026-05-12
+	source_batch:16
+		16 	6 	4 	0.3333 	18365,18367,18368,18370,18371,18372
+	30582ae8e69d36e02a2d7edb7c3bb9ed651ac0ddd249d29c45...
+	duplicate_prediction_signature_in_batch
+	quarantined
+	2026-05-26 15:18:16 	416
+	
+	
+	jos9d_mle_lottery_research_assignments 	  
+	 id 	queue_id 	user_id 	lottery_id 	game_id 	batch_uuid 	batch_header_id 	assigned_status 	assignment_policy 	duplicate_group_key 	assigned_at 	opened_in_skai_at 	saved_count 	scored_count 	completed_at 	last_reconciled_at 	result_status 	result_json 	assignment_settings_json 	assignment_settings_fingerprint 	runner_status 	runner_started_at 	runner_saved_at 	runner_message 	runner_result_json 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	3 	438 	76 	FLB
+	mle-v101-35-ae87e62304b7b491
+	35 	completed
+			2026-05-20 12:14:23 	NULL 	18 	18 	2026-05-20 12:19:04 	2026-05-24 04:37:11 	neutral
+	{"result_status":"neutral","saved_count":18,"score...
+	NULL 			NULL 	NULL 		NULL
+	
+	
+	jos9d_mle_lottery_research_queue 
+ id 	campaign_uuid 	campaign_label 	lottery_id 	game_id 	target_draw_date 	research_status 	research_type 	admin_runner_mode 	setting_family 	setting_key 	control_value 	test_values_json 	hold_constant_json 	settings_fingerprint 	settings_fingerprint_json 	priority_score 	assignment_count 	max_assignments 	replication_needed 	assignment_policy 	duplicate_group_key 	last_assigned_user_id 	last_assignment_decision 	refinement_round 	created_at 	assigned_at 	scored_at 	result_status 	result_json 	last_reconciled_at 	feedback_version 	setting_fingerprint_json 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 			532 	FL7
+		open
+	v109_seeded_from_shared_learning
+		main_frequency_weight
+	skai_blend_ai_pct
+	0
+	["0","20","29","37","46","50","54","63","80"]
+	{"guardrail":"Do not change other settings while t...
+	c31c60c113e0ffbd01ade0e4c6361a5be8ee6f820b7b0bfcc5...
+	{"blend_ai_pct":"50","draws_used":"100","extra_bat...
+	90.0000 	0 	1 	0 	single_user_unique_first_assignment
+	72d57822edccc9aecd03042e5036d1ab2bb355bdabbaf1d02a...
+	0 	v101_refined_assignment_ready
+	0 	2026-05-20 11:45:46 	NULL 	NULL 		NULL 	NULL 		NULL
+	Edit Edit 	Copy Copy 	Delete Delete 	2 			2 	101
+		open
+	v109_seeded_from_shared_learning
+		sampling_temperature
+	sampling_temperature
+	0.12
+	["0.12","0.39","0.398","0.492","0.593","0.695","0....
+	{"guardrail":"Do not change other settings while t...
+	2b2f322e300dee83046cea910f38255dcd0bbcce1d0734a4d2...
+	{"blend_ai_pct":"50","draws_used":"100","extra_bat...
+	90.0000 	0 	1 	0 	single_user_unique_first_assignment
+	96a35a5a9a56e462962d2a98a0f265f5d6bff46cbae6c0a700...
+	0 	v101_refined_assignment_ready
+	0 	2026-05-20 11:45:46 	NULL 	NULL 		NULL 	NULL 		NULL
+	Edit Edit 	Copy Copy 	Delete Delete 	3 			76 	FLB
+		scored
+	personal_plus_global
+			skai_window_size
+	100
+	["100","25","50","100","150","200","300","500","10...
+	{"guardrail":"Important: this is a window-narrowin...
+	6685789a42387242994ae6c4bfb9c509e897e15180e33bc314...
+	{"auto_tune":"0","batch_size":"32","burn_in":"0","...
+	50.0000 	1 	1 	0 	single_user_unique_first_assignment
+	ebd12e0fde164588f5706174465fadb72428c7682d26bfadff...
+	438 	assigned_under_cap
+	0 	2026-05-20 12:14:23 	2026-05-20 12:14:23 	2026-05-20 12:19:04 	neutral
+	{"result_status":"neutral","saved_count":18,"score...
+	2026-05-24 04:37:11 	v99
+	NULL
+	Edit Edit 	Copy Copy 	Delete Delete 	4 			418 	TX2
+		scored
+	personal_plus_global
+			skai_window_size
+	100
+	["100","25","50","100","150","200","300","500","10...
+	{"guardrail":"Important: this is a window-narrowin...
+	00cd9cf9f9e41fe2aa93da131952c887d94d54181d1dadf86d...
+	{"auto_tune":"0","batch_size":"32","burn_in":"0","...
+	50.0000 	1 	1 	0 	single_user_unique_first_assignment
+	70370d8a623422cd12e8501b12e0aaad0ff4c4004e6074d2b9...
+	438 	assigned_under_cap
+	0 	2026-05-21 18:52:06 	2026-05-21 18:52:06 	2026-05-21 18:54:58 	neutral
+	{"result_status":"neutral","saved_count":9,"scored...
+	2026-05-24 04:37:11 	v99
+	NULL
+	Edit Edit 	Copy Copy 	Delete Delete 	5 			533 	145
+		scored
+	personal_plus_global
+			skai_window_size
+	0
+	["0","25","50","100","150","200","300","500","1000...
+	{"guardrail":"Important: this is a window-narrowin...
+	64cea84430c8634ab2cdcfebd2dc1196369b0858728191fb98...
+	{"auto_tune":"0","batch_size":"32","burn_in":"0","...
+	50.0000 	1 	1 	0 	single_user_unique_first_assignment
+	6b3e3e38b6193a1db854da282b84a660c0905702d68fdeadb0...
+	438 	assigned_under_cap
+	0 	2026-05-21 19:02:59 	2026-05-21 19:02:59 	2026-05-21 19:10:40 	neutral
+	{"result_status":"neutral","saved_count":18,"score...
+	2026-05-24 04:37:11 	v99
+	NULL
+	Edit Edit 	Copy Copy 	Delete Delete 	6 			72 	FL1
+		scored
+	personal_plus_global
+			skai_window_size
+	100
+	["100","25","50","100","150","200","300","500","10...
+	{"guardrail":"Important: this is a window-narrowin...
+	6e2a32004f6f61c8d3310ffe065e6cc40d9d88136361ac482d...
+	{"auto_tune":"0","batch_size":"32","burn_in":"0","...
+	50.0000 	1 	1 	0 	single_user_unique_first_assignment
+	0d3c74ac738d398db51f24d59888d49f3ccec1ac60f026fe03...
+	438 	assigned_under_cap
+	0 	2026-05-21 19:20:11 	2026-05-21 19:20:11 	2026-05-21 19:33:22 	neutral
+	{"result_status":"neutral","saved_count":9,"scored...
+	2026-05-24 04:37:11 	v99
+	NULL
+	Edit Edit 	Copy Copy 	Delete Delete 	107 			76 	FLB
+		scored
+	personal_plus_global
+			skai_window_size
+	100
+	["100","25","50","100","150","200","300","500","10...
+	{"guardrail":"Important: this is a window-narrowin...
+	5dbd046c64dd4a52ec2ab75b63cd62a5099272697000d4c153...
+	{"auto_tune":"0","batch_size":"32","burn_in":"0","...
+	50.0000 	1 	1 	0 	single_user_unique_first_assignment
+	ebd12e0fde164588f5706174465fadb72428c7682d26bfadff...
+	555 	assigned_under_cap
+	0 	2026-05-21 20:30:15 	2026-05-21 20:30:15 	2026-05-21 20:32:50 	neutral
+	{"result_status":"neutral","saved_count":9,"scored...
+	2026-05-24 04:37:11 	v99
+	NULL
+	Edit Edit 	Copy Copy 	Delete Delete 	3008 			418 	TX2
+		scored
+	personal_plus_global
+			skai_window_size
+	100
+	["100","25","50","100","150","200","300","500","10...
+	{"guardrail":"Important: this is a window-narrowin...
+	00cd9cf9f9e41fe2aa93da131952c887d94d54181d1dadf86d...
+	{"auto_tune":"0","batch_size":"32","burn_in":"0","...
+	50.0000 	1 	1 	0 	single_user_unique_first_assignment
+	70370d8a623422cd12e8501b12e0aaad0ff4c4004e6074d2b9...
+	438 	assigned_under_cap
+	0 	2026-05-22 17:11:14 	2026-05-22 17:11:14 	2026-05-22 17:22:15 	neutral
+	{"result_status":"neutral","saved_count":9,"scored...
+	2026-05-24 04:37:11 	v99
+	NULL
+	Edit Edit 	Copy Copy 	Delete Delete 	3109 			3 	113
+		scored
+	personal_plus_global
+			skai_window_size
+	16
+	["16","25","50","100","150","200","300","500","100...
+	{"guardrail":"Important: this is a window-narrowin...
+	b8ce9fe5b3da9c13560a9a81637889ec02350f74ec9198d78d...
+	{"auto_tune":"1","batch_size":"32","burn_in":"0","...
+	50.0000 	1 	1 	0 	single_user_unique_first_assignment
+	e6d37d3eb4a36cffe824f9ba336a4744c1a9c30ce5ade67055...
+	512 	assigned_under_cap
+	0 	2026-05-23 01:25:26 	2026-05-23 01:25:26 	2026-05-23 01:39:02 	neutral
+	{"result_status":"neutral","saved_count":9,"scored...
+	2026-05-24 04:37:11 	v99
+	NULL
+	Edit Edit 	Copy Copy 	Delete Delete 	3110 			418 	TX2
+		scored
+	personal_plus_global
+			skai_window_size
+	100
+	["100","25","50","100","150","200","300","500","10...
+	{"guardrail":"Important: this is a window-narrowin...
+	00cd9cf9f9e41fe2aa93da131952c887d94d54181d1dadf86d...
+	{"auto_tune":"0","batch_size":"32","burn_in":"0","...
+	50.0000 	1 	1 	0 	single_user_unique_first_assignment
+	70370d8a623422cd12e8501b12e0aaad0ff4c4004e6074d2b9...
+	438 	assigned_under_cap
+	0 	2026-05-23 17:44:27 	2026-05-23 17:44:27 	2026-05-23 19:02:29 	neutral
+	{"result_status":"neutral","saved_count":9,"scored...
+	2026-05-24 04:37:11 	v99
+	NULL
+	Edit Edit 	Copy Copy 	Delete Delete 	3211 	hive-v150-889c098ed72519853e91f59d
+	Admin Hive Research LA5 2026-05-27 200 runs
+	166 	LA5
+	2026-05-27
+	assigned
+	admin_client_research
+	balanced_sweep
+	admin_sweep
+	settings_bundle
+	1
+	{"profile":"balanced","strategy":"hybrid","skai_bl...
+	{}
+	b615a579639939bbfe9a73851647816b7b27b7426563d880aa...
+	{"profile":"balanced","strategy":"hybrid","skai_bl...
+	100.0000 	1 	1 	0 	single_user
+		0 		0 	2026-05-24 18:18:52 	NULL 	NULL 		NULL 	NULL 		NULL
+
+	
+	
+	jos9d_mle_optimizer_snapshots 	  
+	
+Full texts
+	id 	user_id 	lottery_id 	method 	snapshot_key 	control_profile_json 	setting_evidence_json 	next_experiment_json 	batch_plan_json 	confidence_level 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	438 	72 	skai
+	skai_72_20260511_221526
+	{"has_profile":true,"profile":{"skai_blend_ai_pct"...
+	{"has_signal":true,"settings":{"skai_blend_ai_pct"...
+	{"has_experiment":true,"setting_key":"skai_window_...
+	{"status":"ready","has_plan":true,"method":"skai",...
+	strong
+	2026-05-11 22:15:26 	2026-05-11 22:15:26
+	
+	
+	jos9d_mle_prediction_print_manifest 	
+	
+Full texts
+	id 	user_id 	lottery_id 	game_id 	target_draw_label 	batch_uuid 	prediction_target_id 	prediction_target_key 	analysis_method_key 	manifest_hash 	row_ids_json 	run_uuids_json 	manifest_json 	printed_at 	created_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	774 	2 	101
+	May 16, 2026
+		ptg_8e32c06b07e4723de1fb0358ba9769bf4646d454
+	2-regular-2026-05-16-unspecified
+	skai
+	mle_977c6172_7680
+	["18923","18919","18920","18929","18930","18927","...
+	["5fe2ba8f-58be-4d41-b60b-b2f55237d04b"]
+	{"version":"MLE_PRINT_MANIFEST_LOCK_V1","mode":"pe...
+	2026-05-16 18:13:44 	2026-05-16 18:13:44
+	Edit Edit 	Copy Copy 	Delete Delete 	2 	508 	166 	LA5
+	May 16, 2026
+	bb98e49e-d707-4e63-8def-acc3302bf236
+	ptg_2092ff3383292f3e53a09dcb4844a9e8ebdac9fe
+	166-core-ai-2026-05-16-regular
+	core_ai
+	mle_09b7d5e1_10803
+	["18862","18865","18866","18863","18864","18854","...
+	["9fc41581-5459-485c-9ffa-e2941db2372f","2b281921-...
+	{"version":"MLE_PRINT_MANIFEST_LOCK_V1","mode":"pe...
+	2026-05-16 19:22:38 	2026-05-16 19:22:38
+	
+	
+	jos9d_mle_skai_batch_header 	  
+	
+Full texts
+	id 	user_id 	lottery_id 	lottery_name 	batch_name 	batch_source 	batch_type 	source_page 	status 	test_variable 	range_min 	range_max 	recommended_value 	precision_lock_stage 	recommendation_level 	precision_progress_level 	evidence_summary 	base_settings_id 	locked_settings_id 	created_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	438 	2 	United States - Arizona - Powerball
+	Next Settings 9-Run SKAI Batch - United States - A...
+	advisory
+	Next Settings 9-Run Batch
+	MyLottoExpert
+	generated
+	Past Draws Checked
+	75.0000 	85.0000 	31038.1
+	early_signal
+	Early Signal
+	Evidence Builder
+	4 saved runs are being used to create the next con...
+	14399 	0 	2026-05-08 15:57:59
+	
+	
+	
+	jos9d_mle_skai_batch_run
+	 id 	batch_id 	user_id 	lottery_id 	run_order 	run_name 	is_control 	source 	full_settings_json 	test_variable 	test_value 	status 	created_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	1 	438 	2 	1 	Control - Current Best Settings
+	1 	skai
+	{"version":1,"analysis":"SKAI","profile":"balanced...
+	Past Draws Checked
+	31111.2
+	generated
+	2026-05-08 15:57:59
+	
+	
+ 	
+	jos9d_skai_backtest_metrics 	
+ 	 	id 	game_id 	test_draw_date 	train_window_start 	train_window_end 	window_size 	recall_at_20 	mean_winner_rank 	ndcg_at_20 	winners_json 	missing_winners_json 	params_hash 	created_at 	
+
+	
+	jos9d_skai_backtest_summary 
+	Full texts
+	id 	game_id 	window_start 	window_end 	sample_size 	recall_at_20 	ndcg_at_20 	mean_winner_rank 	top_10_stability 	benchmark_random_lift 	benchmark_frequency_lift 	benchmark_recency_lift 	created_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	3
+	2026-03-14 	2026-03-24 	1490 	0.564832 	0.000000 	0.000000 	0.000000 	0.000000 	0.000000 	0.000000 	2026-03-24 03:10:23
+	
+	
+	jos9d_skai_best_settings 
+	
+Full texts
+	id 	user_id 	lottery_id 	settings_json 	settings_summary 	notes 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	0 	0 	{"frequencyWeight":1.5,"recencyWeight":0.5}
+			2026-05-28 00:53:30 	2026-05-28 00:53:30
+	
+	jos9d_skai_calibration_bins 	 
+	 	id 	game_id 	calibration_version 	bin_index 	score_min 	score_max 	sample_count 	observed_hit_rate 	smoothed_hit_rate 	created_at 	
+	
+	jos9d_skai_calibration_curves 	 
+	 	id 	game_id 	computed_at 	window_size 	num_bins 	calibration_map_json 	is_active 	created_at 	
+	
+	jos9d_skai_component_weights 
+	id 	game_id 	weights_json
+JSON with keys: frequency, skip, recency, cooccur,… 	window_size
+Rolling validation window size used for tuning 	metric
+Optimization metric (recall20, ndcg20) 	metric_value
+Achieved metric value 	num_misses_analyzed
+Number of miss records used 	top_reason_codes
+Most common reason codes 	updated_at 	created_at 	
+	
+	jos9d_skai_evaluation_reports 	 
+	 	id 	game_id 	report_date 	evaluation_period_start 	evaluation_period_end 	num_draws_evaluated 	avg_recall_at_20 	avg_ndcg_at_20 	avg_mean_winner_rank 	top_miss_reasons_json 	before_after_json 	summary_text 	created_at 	
+
+	
+	jos9d_skai_learning_events 
+	Full texts
+	id 	run_uuid 	game_id 	target_draw_date 	official_result_hash 	main_actual_json 	extra_actual_json 	ranked_main_top20_json 	ranked_extra_json 	top5_containment 	top10_containment 	mean_reciprocal_winner_rank 	winner_rank_lift_random 	winner_rank_lift_frequency 	winner_rank_lift_recency 	winner_rank_lift_skip 	promotion_help_rate 	promotion_harm_rate 	protected_core_regression_rate 	is_learned 	created_at 	learned_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	c71462bb-2a9a-0ffd-b85a-762288968182
+	TX2
+	2026-05-21 	fc77bad0201e0c1c4f6732e47ff531958ab909513736dce862...
+	[4,9,16,18,27]
+	[]
+	[19,28,9,30,33,25,35,6,23,24,31,14,5,8,15,26,11,18...
+	[]
+	0.000000 	0.000000 	0.000000 	0.000000 	0.000000 	0.000000 	0.000000 	0.000000 	0.000000 	0.000000 	1 	2026-05-25 14:15:19 	2026-05-25 14:15:19
+	
+	
+	jos9d_skai_learning_performance 
+	 id 	user_id 	lottery_id 	lottery_name 	draw_date 	run_date 	run_id 	run_uuid 	advice_status 	advice_status_updated_at 	status_explicit 	snapshot_run_uuid 	run_identity_key 	prediction_target_id 	prediction_target_key 	target_game_id 	target_lottery_id 	target_draw_date 	target_draw_at 	target_draw_session 	target_timezone_id 	target_prediction_family 	target_prediction_type 	source 	analysis_method_key 	analysis_engine_label 	analysis_track_label 	actual_numbers_json 	predicted_ranking_json 	avg_winning_rank 	best_winning_rank 	worst_winning_rank 	median_winning_rank 	weighted_quality_score 	top10_hits 	top20_hits 	top30_hits 	top50_hits 	missing_hits_count 	combo_hit_summary_json 	tail_enabled 	tail_active 	tail_promoted_count 	tail_promoted_hit_count 	calibration_enabled 	calibration_active 	shared_learning_enabled 	pairwise_enabled 	gibbs_enabled 	live_tuning_enabled 	confidence_level 	trend_bucket 	notes_json 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	438 	73 	United States - Florida - Fantasy 5 Evening
+	2026-03-29 	2026-03-29 23:34:54 	13674 		watch
+	2026-05-17 20:04:21 	1 		rowid:13674
+	ptg_625a0ec9d034b2eb9434d72f39521ba8c0e8b2e3
+	73-regular-2026-03-29-unspecified
+	FL3
+	73 	2026-03-29 	NULL 		America/New_York
+	regular
+	regular
+	skai_prediction
+	skai
+	SKAI
+	SKAI Precision Track
+	[2,7,18,22,28]
+	[25,18,5,34,8,16,15,7,14,22,10,30,20,27,2,3,26,6,2...
+	11.00 	2 	20 	10.00 	0.841667 	3 	5 	5 	5 	0 	{"hits_main":5,"hits_extra":0}
+	0 	0 	0 	0 	0 	0 	0 	0 	0 	0 	scored
+	auto_scored_exact_draw
+	{"auto_scored_from_visual_row":true,"scoring_rule"...
+	2026-03-30 06:34:02 	2026-05-28 11:41:36
+
+	
+	jos9d_skai_lottery_settings 	  
+	 id 	game_id 	lottery_slug 	main_pool_size 	bonus_pool_size 	draw_count_main 	draw_count_bonus 	is_multistate 	is_multicountry 	supports_bonus 	supports_pairs 	supports_tail_recovery 	supports_calibration 	supports_gibbs 	active_parameter_set_id 	active_calibration_version 	active_tail_version 	status 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	3
+	game_FL3
+	36 	0 	1500 	0 	0 	0 	0 	1 	1 	1 	0 	0 			active
+	2026-03-29 18:24:29 	2026-03-29 18:24:29
+	
+	
+	
+	jos9d_skai_miss_attribution 	 
+	 	id 	backtest_metric_id 	game_id 	test_draw_date 	missed_number 	rank_in_full_list 	score_total 	score_parts_json 	reason_codes 	sensitivity_json 	top20_median_json 	created_at 	
+
+	
+	jos9d_skai_pairwise_stats 	 
+	 	id 	game_id 	ball_type 	computed_at 	window_size 	num_i 	num_j 	p_i 	p_j 	p_ij 	lift 	created_at 	
+
+	
+	jos9d_skai_parameter_sets 	
+  	 id 	game_id 	parameter_version 	parameter_json 	source_mode 	is_live_path 	is_active 	score_path_hash 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	3
+	e31d390d-d357-4c8e-a635-b5770999e35a
+	{"frequencyWeight":1.5,"recencyWeight":0.5}
+	canonical_grid
+	0 	1 		2026-03-24 03:10:23 	2026-03-24 03:10:23
+	
+	
+	jos9d_skai_runtime_audit 
+	 id 	run_uuid 	game_id 	domain_verified 	mode_verified 	metrics_complete 	display_matches_engine 	snapshot_matches_engine 	fallback_triggered 	fallback_reason 	audit_status 	created_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	e31d390d-d357-4c8e-a635-b5770999e35a
+	0
+	0 	0 	1 	0 	1 	1 	implausible_draw_count game=FL3
+	complete
+	2026-03-24 03:10:23
+	
+	
+	jos9d_skai_run_log 	  	
+	 id 	run_uuid 	user_id 	game_id 	lottery_slug 	engine_version 	config_version 	tuning_mode 	calibration_enabled 	tail_recovery_enabled 	pairwise_enabled 	gibbs_enabled 	runtime_status 	final_rank_source 	score_path_hash 	created_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	d94d41a0-74d2-4818-9dc1-160d81c96b6e
+	444 	0
+		2.0
+	60188815
+		0 	0 	0 	0 	complete
+		60188815
+	2026-03-18 04:15:53
+	
+	
+	jos9d_skai_run_logs 	 
+	 	id 	game_id 	run_date 	draw_date 	model_version 	params_json 	ranked_list 	top20_nums 	extras_json 	deterministic 	seed 	created_at 	
+
+	
+	jos9d_skai_shared_learning 	  
+	 id 	game_id 	learning_key 	learning_scope 	metric_json 	sample_count 	last_result_date 	last_run_uuid 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	11 	101
+	outcome_frequency
+	global
+	{"game_id":"101","draws_used":1345,"frequency":{"1...
+	1541 	2026-04-22 	1236adc2-993e-449f-8c89-85462f349bbb
+	2026-03-19 15:57:51 	2026-04-22 03:51:56
+	
+	
+	jos9d_skai_shared_learning_profiles 	
+	
+Full texts
+	id 	game_id 	lottery_id 	method_key 	profile_type 	recommended_window_min 	recommended_window_max 	recommended_window_center 	sweet_window_min 	sweet_window_max 	evidence_users 	evidence_runs 	evidence_draws 	confidence_score 	stability_score 	baseline_lift 	status 	last_scored_draw_date 	profile_json 	historical_backfill_json 	last_backfill_at 	is_active 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	FL6
+	74 	skai
+	history_window
+	750 	750 	750 	750 	750 	1 	7 	5 	0.461792 	1.000000 	0.000000 	collecting
+	2026-05-22 	{"version":"v80_global_learning_batch_intelligence...
+	{"version":"v80_global_learning_batch_intelligence...
+	2026-05-27 22:17:48 	1 	2026-05-18 17:34:05 	2026-05-27 22:17:48
+	
+	
+	
+	jos9d_skai_skip_hit_learning 
+ id 	game_id 	learning_key 	learning_scope 	metric_json 	sample_count 	last_result_date 	last_run_uuid 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	FL3
+	optimal_window
+	global
+	{"window":777,"mode":"manual"}
+	5984 	2026-05-22 	sh_FL3_677f03020ce2d41a
+	2026-03-19 20:01:21 	2026-05-24 00:20:16
+		
+	
+	jos9d_skai_skip_hit_number_learning 	
+ id 	game_id 	pool_key 	number_value 	skip_value 	rank_band 	times_seen 	times_predicted 	times_hit 	times_missed 	times_outlier_hit 	avg_raw_rank 	avg_adjusted_rank 	promotion_score 	outlier_score 	reliability_score 	metric_json 	last_draw_date 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	101
+	main
+	57 	-1332 	unknown
+	76 	0 	19 	0 	19 	6.003 	NULL 	0.250000 	0.250000 	0.662500 	{"times_seen":76,"times_hit":19,"times_outlier_hit...
+	2026-04-01 	2026-04-11 09:52:34 	2026-04-11 11:54:18
+		
+	
+	jos9d_skai_skip_hit_outcomes 	
+	Full texts
+	id 	game_id 	draw_date 	predicted_json 	actual_json 	performance_json 	created_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	FL3
+	2026-03-18 	{"main":[34,17,35,31,10,27,9,14,3,2,22,20,6,30,7,2...
+	{"main":[1,8,26,33,36],"extra":0}
+	{"main_matches":0,"recall20":0,"ndcg20":0,"mean_wi...
+	2026-03-19 20:01:21
+
+	
+	jos9d_skai_skip_hit_prediction_detail 	 
+	 	id 	run_uuid 	game_id 	draw_date 	pool_key 	number_value 	raw_rank 	adjusted_rank 	base_score 	learned_adjustment 	outlier_bonus 	final_score 	skip_value 	hit_flag 	was_predicted_flag 	was_promoted_flag 	created_at 	
+
+	
+	
+	jos9d_skai_skip_hit_runs 	  
+	 	id 	run_uuid 	game_id 	mode 	draw_window 	weights_json 	score_summary_json 	created_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	sh_FL3_3d6e42740e92ed4e
+	FL3
+	auto_tune
+	7 	{"frequency":0.5,"skip":0.3,"historical":0.1999999...
+	{"avg_main_matches":2.45,"avg_recall20":0.49,"avg_...
+	2026-03-19 20:01:21
+
+	
+	
+	jos9d_skai_tail_miss_runs 	 
+	 	id 	game_id 	run_at 	analysis_window 	draws_analyzed 	bucket_top20 	bucket_near_miss_21_30 	bucket_weak_miss_31_50 	bucket_hard_miss_51plus 	deficit_aggregates_json 	prior_model_json 	promotion_metrics_json 	created_at 	
+
+	
+	
+	jos9d_skai_tail_miss_stats 	 
+	id 	game_id 	draw_date 	winner_number 	baseline_rank 	rank_bucket
+[[SKAI_HIT_TOP20]] | [[SKAI_NEAR_MISS_21_30]] | [[… 	score_total 	calibrated_score 	score_parts_json 	top20_median_json 	component_deficits
+JSON deficits per score component 	miss_causes_json
+JSON: low_raw, excess_penalty, weak_pairwise, poor… 	reason_codes 	created_at 	
+
+	
+	
+	jos9d_skai_tail_recovery_summary 	
+	Full texts
+	id 	game_id 	tail_version 	window_start 	window_end 	tail_miss_reduction_rate 	near_miss_promotion_rate 	tail_gain_score 	protected_core_regression_rate 	sample_count 	created_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	3
+	e31d390d-d357-4c8e-a635-b5770999e35a
+	2026-02-22 	2026-03-24 	0.000000 	0.000000 	0.000000 	0.000000 	1500 	2026-03-24 03:10:23
+	
+	
+	
+	jos9d_skai_tuned_params 	 
+	id 	game_id 	tuned_at 	validation_window_start 	validation_window_end 	num_validation_draws 	objective_value 	recall_at_20 	ndcg_at_20 	mean_winner_rank 	params_json 	is_active 	created_at 	
+
+	
+	
+	jos9d_skai_user_preferences
+	 	id 	user_id 	game_id 	risk_profile 	coverage_style 	combo_count_preference 	overlap_tolerance 	ui_density_preference 	show_advanced_panels 	created_at 	updated_at 	
+	Edit Edit 	Copy Copy 	Delete Delete 	1 	438 	3
+	balanced
+	balanced
+	5 	medium
+	comfortable
+	0 	2026-03-24 03:10:23 	2026-03-28 21:18:52
+	
+	
+	
+	jos9d_user_saved_numbers
+	Full texts
+	id 	user_id 	lottery_id 	game_id 	main_numbers 	source 	save_intent 	origin_source 	play_status 	user_editable 	play_notes 	wheel_exported_at 	wheel_export_count 	is_favorite_play 	label 	top_combos_json 	date_saved 	generated_at Descending 1 	draws_analyzed 	extra_ball_numbers 	main_matches 	bonus_matches 	matched_numbers 	next_draw_date
+Next scheduled drawing date 	latest_draw_date 	mode_key 	model_version 	tfjs_version 	browser_engine 	client_result_hash 	server_validation_hash 	next_draw_at 	draw_session 	star_ball1 	star_ball2 	epochs 	batch_size 	dropout_rate 	learning_rate 	activation_function 	hidden_layers 	recency_decay 	walks 	burn_in 	laplace_k 	decay 	chain_len 	freq_weight
+Main‐ball frequency weight (percentages 0–100) 	skip_weight
+Main‐ball skip weight (percentages 0–100) 	hist_weight
+Main‐ball historical weight (percentages 0–100) 	pb_freq_weight
+Extra‐ball frequency weight (percentages 0–100) 	pb_skip_weight
+Extra‐ball skip weight (percentages 0–100) 	pb_hist_weight
+Extra‐ball historical weight (percentages 0–100) 	skip_window 	digit_probabilities
+Maps each position to its 10-element [p0…p9] proba… 	position_combinations
+Per-position combination candidates / rankings (JS… 	pure_mode 	draws_used 	tune_used 	best_window 	auto_tune 	tuned_window 	skai_blend_skip_pct 	skai_blend_ai_pct 	sampling_temperature 	diversity_penalty 	gap_scale 	skai_window_size 	skai_run_mode 	skai_top_n_numbers 	skai_top_n_combos 	risk_profile 	strategy 	settings_json 	utc_epoch 	user_local_datetime 	timezone_id 	progress_stage 	progress_label 	save_schema_version
+Schema version marker for structured display field… 	prediction_family
+regular or daily 	prediction_type
+powerball euromillions pick3 pick4 pick5 etc 	render_mode
+regular_main_extra or daily_combos 	main_display_json
+JSON array of main display numbers in probability … 	extra_display_json
+JSON array of extra/bonus display numbers in proba… 	canonical_main_display
+CSV of main display numbers in canonical probabili… 	canonical_extra_display
+CSV of extra display numbers canonical 	prediction_extra_display_count
+Count of extra/bonus numbers in display set 	regular_main_numbers_json
+Regular lottery: JSON array of main numbers for di… 	regular_extra_numbers_json
+Regular lottery: JSON array of extra/bonus numbers… 	daily_pick_size
+Daily lottery: pick size 3 4 or 5 	daily_primary_prediction
+Daily lottery: primary combo display string e.g. 1… 	daily_primary_prediction_json
+Daily lottery: JSON array of primary combo digits 	daily_top_picks_json
+Daily lottery: JSON array of top-5 combo display s… 	daily_top_pick_strings_json
+Daily lottery: JSON array of top-5 combo strings w… 	daily_bonus_digits_json
+Daily lottery: JSON array of bonus digit integers 	daily_influential_digits_json
+Daily lottery: JSON array of ranked/influential di… 	daily_display_payload_json
+Daily lottery: full canonical display payload for … 	daily_learning_payload_json
+Daily lottery: structured payload for learning/tra… 	display_variant
+Renderer display variant hint e.g. powerball eurom… 	renderer_hint
+Renderer hint for MyLottoExpert display logic 	canonical_display_string
+Human-readable canonical display summary string 	prediction_target_id
+Immutable canonical draw target identifier 	prediction_target_key
+Canonical draw target identity key before hashing 	prediction_target_json
+Structured canonical draw target payload 	target_game_id
+Canonical game identifier bound at save time 	target_lottery_id
+Canonical lottery row identifier bound at save tim… 	target_draw_date
+Canonical draw date bound at save time 	target_draw_at
+Canonical draw timestamp bound at save time 	target_draw_session
+Canonical draw session bound at save time 	target_timezone_id
+Timezone used to resolve the canonical target 	target_prediction_family
+regular or daily for canonical target 	target_prediction_type
+prediction type bound into canonical target 	target_pick_size
+Pick size bound into canonical target 	target_extra_count
+Extra count bound into canonical target 	run_uuid
+Execution identity from SKAI snapshot/save envelop… 	snapshot_run_uuid
+Posted snapshot execution identity used during sav… 	advice_status 	advice_status_updated_at 	status_explicit 	source_batch_id
+MyLottoExpert Precision Lock batch header id 	source_batch_run_id
+MyLottoExpert Precision Lock batch run id 	source_batch_type
+Originating batch type 	source_batch_run_order
+Run order inside the originating batch 	source_batch_origin
+Originating batch bridge identifier 	batch_control_flag
+1 when this saved prediction is the Precision Lock… 	source_batch_test_variable
+Precision Lock setting being tested 	source_batch_test_value
+Precision Lock tested value 	analysis_run_uuid 	client_hash 	result_hash 	model_family 	strategy_profile 	batch_type 	batch_uuid 	batch_index 	batch_total 	settings 	ranked_main_numbers_json 	ranked_extra_numbers_json 	focus_profile 	signal_blend_ai_pct 	signal_blend_skip_pct 	signal_blend_label 	analysis_method_key 	analysis_engine_label 	analysis_track_label 	analysis_source_page 	analysis_schema_version 	daily_set_predictions_json 	prediction_uid 	comparison_group_key 	evaluation_status 	actual_draw_date 	actual_main_numbers 	actual_extra_numbers 	main_hits_count 	extra_hits_count 	learning_score 	evaluation_json 	evaluated_at 	hive_learning_contract_version
+Hive learning contract schema version saved by SKA… 	hive_intake_mode
+planned_hive_guided, observed_manual_skai, or obse… 	hive_queue_id
+Hive research queue id when assigned before run 	hive_assignment_id
+Hive assignment id when assigned before run 	hive_research_type
+Hive research type or observed intake type 	hive_setting_key
+Hive setting key being tested when known 	hive_settings_fingerprint
+Normalized settings fingerprint used by hive dupli… 	hive_contract_status
+hive_ready, tracking_ready, or missing_required_fi… 	hive_contract_json
+Canonical SKAI hive learning contract payload 	hive_contract_missing_json
+JSON array of missing contract fields at save time 	hive_cron_last_checked_at 	hive_cron_next_check_at 	hive_cron_wait_reason 	hive_cron_attempt_count 	
+	Edit Edit 	Copy Copy 	Delete Delete 	23874 	1021 	463 	WA6
+	8,10,34,12,22,6,24,14,19,25,20,37,30,1,5,29,16,33,...
+	ai_prediction
+	prediction_archive
+	core_ai
+	archived
+	1 	NULL 	NULL 	0 	0 	Hit 5 Prediction - 5/28/2026, 7:02:45 AM | Conserv...
+	NULL 	2026-05-28 14:58:29 	2026-05-28 13:47:17 	4199 		NULL 	NULL 	NULL 	2026-05-28 00:00:00 	2026-05-27 00:00:00 	ai-forward
+	legacy-tfjs-client-v2
+	4.20.0
+	Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:151.0...
+	3ab48d1546a8f39bea9aaf34bd6a3676b54f3923848cfb1023...
+	fc829245c93ccdf8c7782965c7390802ab88dbae45e37efce0...
+	NULL 	NULL 	NULL 	NULL 	170 	32 	0.22 	0.0008 	relu
+	3 	0.98 	0 	0 	0.00000 	0.00000 	0 	0.00 	0.00 	0.00 	0.00 	0.00 	0.00 	0 	NULL 	NULL 	0 	0 	0 	NULL 	0 	0 	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	conservative
+	NULL 	{"model_family":"core_ai","analysis_method_key":"c...
+	NULL 	NULL 	NULL 	NULL 	NULL 	2 	NULL 	NULL 	NULL 	{"renderer_hint":"ranked_main_top20","numbers":[8,...
+	{"renderer_hint":"none","numbers":[],"ranked":[]}
+	NULL 	NULL 	NULL 	[{"rank":1,"number":8,"probability":0.04002796,"ba...
+	[]
+	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	NULL 	ptg_8aa8db9f35de600be4bbc8cdedf56c8d877c1522
+	463-core-ai-2026-05-28-regular
+	{"prediction_target_id":"ptg_8aa8db9f35de600be4bbc...
+	WA6
+	463 	2026-05-28 	NULL 	regular
+	America/New_York
+	core_ai
+	core_ai_foundation
+	5 	0 	00415115-6ad0-47de-b183-6019853de429
+	NULL 	use_in_advice
+	NULL 	0 	NULL 	NULL 	NULL 	NULL 	NULL 	0 	NULL 	NULL 	00415115-6ad0-47de-b183-6019853de429
+	3ab48d1546a8f39bea9aaf34bd6a3676b54f3923848cfb1023...
+	fc829245c93ccdf8c7782965c7390802ab88dbae45e37efce0...
+	core_ai
+	blend_75
+	core_ai_precision_lock_9_batch
+	a7a174f5-f7c4-4b8e-a54c-4b3825d07337
+	9 	9 	{"model_family":"core_ai","analysis_method_key":"c...
+	[{"rank":1,"number":8,"probability":0.04002796,"ba...
+	[]
+		NULL 	NULL 		core_ai
+	LottoExpert Core AI
+	Core AI Precision Lock Track
+	core_ai
+	1
+	NULL 			pending
+	NULL 			0 	0 	0.00000000 	NULL 	NULL 			NULL 	NULL 	NULL 	NULL 	NULL 		NULL 	NULL 	2026-05-28 16:15:36 	2026-05-29 04:15:36 	official_draw_not_loaded
+	6
+	
+	
+	
+	jos9d_le_run_gate
+	 
+	 	id 	run_date 	game_id 	user_id 	ip_hash 	runs 	updated_at 	
+
+	
+	
+	
+	
+	
+	
