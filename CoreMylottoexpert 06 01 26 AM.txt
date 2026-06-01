@@ -24144,27 +24144,14 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
             $upcoming = mylottoexpertResolveUpcomingDrawScope($card);
             $upcomingDate = trim((string)($upcoming['date'] ?? ''));
             if ($upcomingDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $upcomingDate)) { return 0; }
-            $upcomingDrawAt = trim((string)($upcoming['draw_at'] ?? ''));
-            $nowTs = time();
-            if ($upcomingDrawAt !== '' && strncmp($upcomingDrawAt, '0000-00-00', 10) !== 0) {
-                $upcomingTs = strtotime($upcomingDrawAt);
-                if ($upcomingTs && $upcomingTs < $nowTs) { return 0; }
-            }
-
             $drawParts = array();
             foreach (array('target_draw_date','next_draw_date','latest_draw_date','draw_date') as $drawCol) {
                 if ($hasCol($drawCol)) { $drawParts[] = 'NULLIF(' . $qn($drawCol) . ', ' . $db->quote('0000-00-00') . ')'; }
             }
             $drawExpr = !empty($drawParts) ? 'COALESCE(' . implode(',', $drawParts) . ')' : 'NULL';
             $where[] = '((' . $drawExpr . ') IS NOT NULL AND DATE(' . $drawExpr . ') = ' . $db->quote($upcomingDate) . ')';
-            $drawAtParts = array();
-            foreach (array('target_draw_at','next_draw_at','draw_at') as $drawAtCol) {
-                if ($hasCol($drawAtCol)) { $drawAtParts[] = 'NULLIF(' . $qn($drawAtCol) . ', ' . $db->quote('0000-00-00 00:00:00') . ')'; }
-            }
-            if (!empty($drawAtParts) && $upcomingDate === date('Y-m-d')) {
-                $drawAtExpr = 'COALESCE(' . implode(',', $drawAtParts) . ')';
-                $where[] = '((' . $drawAtExpr . ') IS NULL OR (' . $drawAtExpr . ') >= NOW())';
-            }
+            /* Keep valid pending rows for the target draw date even after draw_at.
+               Pending status, score status, and actual-number guards above remain authoritative. */
 
             if ($requireIdentity) {
                 /* Exclude strategy_set rows (they are strategy/play-set records, not runs). */
@@ -29509,29 +29496,36 @@ $__mleStrictPendingTotal = 0;
 foreach ($__mleStrictPendingByLotteryId as $__mleStrictPendingVal) { $__mleStrictPendingTotal += max(0, (int)$__mleStrictPendingVal); }
 $__mleBriefTotals['pending'] = $__mleStrictPendingTotal;
 unset($__mleStrictPendingVal, $__mleStrictPendingTotal);
-/* [[MLE_V5_STRICT_PENDING_DEBUG_2026_06_01]] Admin-only diagnostics (hidden). */
-if (!$user->guest && $user->authorise('core.admin')) {
-    $__mleStrictPendingDebug = array();
+/* [[MLE_V5_STRICT_PENDING_DEBUG_PANEL_2026_06_01]]
+   Temporary Super User-only diagnostics for strict pending reconciliation. */
+$__mleShowStrictPendingDiagnosticPanel = (!$user->guest && $user->authorise('core.admin'));
+$__mleStrictPendingDiagnosticRows = array();
+$__mleStrictPendingDiagnosticStrictTotal = 0;
+$__mleStrictPendingDiagnosticTopTotal = 0;
+if ($__mleShowStrictPendingDiagnosticPanel) {
     foreach ($__mleStrictPendingByLotteryId as $__mleStrictDbgLid => $__mleStrictDbgCount) {
         $__mleStrictDbgScope = $__mleStrictPendingScopeByLotteryId[(int)$__mleStrictDbgLid] ?? array();
-        $__mleStrictPendingDebug[] = array(
-            'lottery_id'           => (int)$__mleStrictDbgLid,
-            'upcoming_draw_date'   => (string)($__mleStrictDbgScope['date'] ?? ''),
-            'strict_pending_count' => (int)$__mleStrictDbgCount,
-        );
-    }
-    foreach ($__mleBriefCards as $__mleStrictDbgCard) {
-        $__mleStrictDbgLid = (int)($__mleStrictDbgCard['lottery_id'] ?? 0);
-        foreach ($__mleStrictPendingDebug as &$__mleStrictDbgRow) {
-            if ((int)$__mleStrictDbgRow['lottery_id'] === $__mleStrictDbgLid) {
-                $__mleStrictDbgRow['top_card_pending_displayed'] = (int)($__mleStrictDbgCard['pending'] ?? 0);
-                break;
-            }
+        $__mleStrictDbgTopDisplayed = 0;
+        $__mleStrictDbgName = 'Lottery #' . (int)$__mleStrictDbgLid;
+        foreach ($__mleBriefCards as $__mleStrictDbgCard) {
+            if ((int)($__mleStrictDbgCard['lottery_id'] ?? 0) !== (int)$__mleStrictDbgLid) { continue; }
+            $__mleStrictDbgTopDisplayed = (int)($__mleStrictDbgCard['pending'] ?? 0);
+            $__mleStrictDbgName = trim((string)($__mleStrictDbgCard['name'] ?? '')) !== '' ? (string)$__mleStrictDbgCard['name'] : $__mleStrictDbgName;
+            break;
         }
-        unset($__mleStrictDbgRow);
+        $__mleStrictPendingDiagnosticRows[] = array(
+            'lottery_id'                 => (int)$__mleStrictDbgLid,
+            'lottery_name'               => (string)$__mleStrictDbgName,
+            'upcoming_draw_date'         => (string)($__mleStrictDbgScope['date'] ?? ''),
+            'strict_pending_count'       => (int)$__mleStrictDbgCount,
+            'top_card_pending_displayed' => (int)$__mleStrictDbgTopDisplayed,
+            'pending_delta'              => (int)$__mleStrictDbgCount - (int)$__mleStrictDbgTopDisplayed,
+        );
+        $__mleStrictPendingDiagnosticStrictTotal += max(0, (int)$__mleStrictDbgCount);
+        $__mleStrictPendingDiagnosticTopTotal += max(0, (int)$__mleStrictDbgTopDisplayed);
     }
-    echo '<!-- mle-strict-pending-debug:' . json_encode($__mleStrictPendingDebug) . ':end -->';
-    unset($__mleStrictPendingDebug, $__mleStrictDbgLid, $__mleStrictDbgCount, $__mleStrictDbgScope, $__mleStrictDbgCard);
+    echo '<!-- mle-strict-pending-debug:' . json_encode($__mleStrictPendingDiagnosticRows) . ':end -->';
+    unset($__mleStrictDbgLid, $__mleStrictDbgCount, $__mleStrictDbgScope, $__mleStrictDbgCard, $__mleStrictDbgTopDisplayed, $__mleStrictDbgName);
 }
 unset($__mleBriefSourceCards, $__briefCardRaw, $__briefLid, $__briefName, $__briefStats, $__briefSummary, $__briefVisual, $__briefProgress, $__briefBatch, $__briefSettings, $__briefTopMethod, $__briefMethodKey, $__briefMethodLabel, $__briefMethodRole, $__briefMethodTrack, $__briefPending, $__briefScored, $__briefDrawCycles, $__briefStageKey, $__briefStageLabel, $__briefStageRank, $__briefCleanName, $__briefType, $__briefLabel, $__briefDetail, $__briefPriority, $__briefActionTarget, $__briefActionPanel, $__briefActionCta, $__briefActionState, $__briefTargetKind, $__briefHasRecommendedAction);
 unset($__mleStrictPendingByLotteryId, $__mleStrictPendingScopeByLotteryId, $__mleStrictPendingFullByLotteryId);
@@ -29607,6 +29601,47 @@ $__mleHeroFocusCta = $__mleBriefFocusCta !== '' ? $__mleBriefFocusCta : 'Open re
 
   </div>
 </section>
+
+<?php if (!empty($__mleShowStrictPendingDiagnosticPanel)): ?>
+<section class="mle-strict-pending-diagnostic-panel" role="region" aria-label="Super User pending diagnostics" style="max-width:1260px;margin:14px auto 10px;padding:12px 14px;border:1px solid #f59e0b;background:#fffbea;border-radius:10px;">
+  <div style="font-size:13px;font-weight:700;color:#7c2d12;margin-bottom:6px;">Temporary Super User Diagnostic Panel: Strict Pending Reconciliation</div>
+  <div style="font-size:12px;color:#7c2d12;margin-bottom:10px;">
+    Strict pending total: <strong><?php echo (int)$__mleStrictPendingDiagnosticStrictTotal; ?></strong>
+    | Top card pending total: <strong><?php echo (int)$__mleStrictPendingDiagnosticTopTotal; ?></strong>
+    | Delta: <strong><?php echo (int)$__mleStrictPendingDiagnosticStrictTotal - (int)$__mleStrictPendingDiagnosticTopTotal; ?></strong>
+  </div>
+  <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:6px;border-bottom:1px solid #fdba74;">Lottery</th>
+          <th style="text-align:left;padding:6px;border-bottom:1px solid #fdba74;">Lottery ID</th>
+          <th style="text-align:left;padding:6px;border-bottom:1px solid #fdba74;">Upcoming draw date</th>
+          <th style="text-align:left;padding:6px;border-bottom:1px solid #fdba74;">Strict pending map</th>
+          <th style="text-align:left;padding:6px;border-bottom:1px solid #fdba74;">Top card pending</th>
+          <th style="text-align:left;padding:6px;border-bottom:1px solid #fdba74;">Delta</th>
+        </tr>
+      </thead>
+      <tbody>
+      <?php if (!empty($__mleStrictPendingDiagnosticRows)): ?>
+        <?php foreach ($__mleStrictPendingDiagnosticRows as $__mleStrictDiagRow): ?>
+          <tr>
+            <td style="padding:6px;border-bottom:1px solid #fed7aa;"><?php echo htmlspecialchars((string)($__mleStrictDiagRow['lottery_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+            <td style="padding:6px;border-bottom:1px solid #fed7aa;"><?php echo (int)($__mleStrictDiagRow['lottery_id'] ?? 0); ?></td>
+            <td style="padding:6px;border-bottom:1px solid #fed7aa;"><?php echo htmlspecialchars((string)($__mleStrictDiagRow['upcoming_draw_date'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+            <td style="padding:6px;border-bottom:1px solid #fed7aa;"><?php echo (int)($__mleStrictDiagRow['strict_pending_count'] ?? 0); ?></td>
+            <td style="padding:6px;border-bottom:1px solid #fed7aa;"><?php echo (int)($__mleStrictDiagRow['top_card_pending_displayed'] ?? 0); ?></td>
+            <td style="padding:6px;border-bottom:1px solid #fed7aa;"><?php echo (int)($__mleStrictDiagRow['pending_delta'] ?? 0); ?></td>
+          </tr>
+        <?php endforeach; unset($__mleStrictDiagRow); ?>
+      <?php else: ?>
+        <tr><td colspan="6" style="padding:6px;">No strict pending rows were collected.</td></tr>
+      <?php endif; ?>
+      </tbody>
+    </table>
+  </div>
+</section>
+<?php endif; ?>
 
 <div class="mle-today-briefing" role="region" aria-label="Your Next Best Action">
   <div class="mle-today-briefing__inner">
