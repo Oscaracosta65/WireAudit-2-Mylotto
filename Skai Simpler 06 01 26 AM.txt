@@ -667,12 +667,17 @@ $gameId = $gameIdRaw; // string; do NOT cast to int here
 // when browser storage is not available after a redirect.
 // ========================================================================
 $skaiMleServerBatchPayload = null;
-$skaiMleServerBatchStatus = array('requested' => false, 'batch_id' => 0, 'loaded' => false, 'reason' => 'not_requested', 'row_count' => 0);
+$skaiMleServerBatchStatus = array('requested' => false, 'guided_requested' => false, 'batch_id' => 0, 'loaded' => false, 'reason' => 'not_requested', 'row_count' => 0, 'required_action' => '', 'warning_message' => '');
 try {
-    $skaiMleBatchRequested = ((int)$in->getInt('mle_skai_batch', 0) === 1);
+    $skaiMleGuidedMode = strtolower(trim((string)$in->getCmd('mle_guided_mode', '')));
+    $skaiMleRequiredAction = strtolower(trim((string)$in->getCmd('mle_required_action', '')));
     $skaiMleBatchId = (int)$in->getInt('batch_id', 0);
+    $skaiMleBatchRequested = ((int)$in->getInt('mle_skai_batch', 0) === 1) || ($skaiMleBatchId > 0 && $skaiMleGuidedMode === 'required');
+    $skaiMleGuidedRequested = ($skaiMleBatchId > 0 && $skaiMleGuidedMode === 'required');
     $skaiMleServerBatchStatus['requested'] = (bool)$skaiMleBatchRequested;
+    $skaiMleServerBatchStatus['guided_requested'] = (bool)$skaiMleGuidedRequested;
     $skaiMleServerBatchStatus['batch_id'] = (int)$skaiMleBatchId;
+    $skaiMleServerBatchStatus['required_action'] = (string)$skaiMleRequiredAction;
     if ($skaiMleBatchRequested) { $skaiMleServerBatchStatus['reason'] = 'requested'; }
     if ($skaiMleBatchRequested && $skaiMleBatchId > 0 && !$currUser->guest) {
         $skaiMleDb = Factory::getDbo();
@@ -788,7 +793,12 @@ try {
                     $skaiMleServerBatchStatus['loaded'] = true;
                     $skaiMleServerBatchStatus['reason'] = 'loaded';
                 } else {
-                    $skaiMleServerBatchStatus['reason'] = 'run_count_not_9';
+                    if ($skaiMleGuidedRequested) {
+                        $skaiMleServerBatchStatus['reason'] = 'incomplete_guided_batch';
+                        $skaiMleServerBatchStatus['warning_message'] = 'The requested guided batch is incomplete and cannot be loaded safely. Please return to MyLottoExpert and create/open a fresh tracked 9-run batch.';
+                    } else {
+                        $skaiMleServerBatchStatus['reason'] = 'run_count_not_9';
+                    }
                 }
             } else {
                 $skaiMleServerBatchStatus['reason'] = 'header_not_found_for_user';
@@ -805,6 +815,12 @@ try {
     $skaiMleServerBatchStatus['reason'] = 'exception';
     error_log('[SKAI_MLE_BATCH_BRIDGE] Could not load MyLottoExpert batch: ' . $skaiMleBridgeEx->getMessage());
     $skaiMleServerBatchPayload = null;
+}
+if (!empty($skaiMleServerBatchStatus['guided_requested']) && empty($skaiMleServerBatchStatus['loaded'])) {
+    if (empty($skaiMleServerBatchStatus['warning_message'])) {
+        $skaiMleServerBatchStatus['warning_message'] = 'The requested guided batch was not loaded. Please return to MyLottoExpert and open a tracked 9-run batch again.';
+    }
+    try { Factory::getApplication()->enqueueMessage((string)$skaiMleServerBatchStatus['warning_message'], 'warning'); } catch (\Throwable $skaiMleWarnEx) { }
 }
 try {
     $doc->addScriptDeclaration('window.SKAI_MLE_SERVER_BATCH_PAYLOAD = ' . json_encode($skaiMleServerBatchPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . '; window.SKAI_MLE_SERVER_BATCH_STATUS = ' . json_encode($skaiMleServerBatchStatus, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ';');
@@ -59722,7 +59738,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function skaiMleShowMissingPayloadWarning() {
     try {
-      if (window.location.search.indexOf('mle_skai_batch=1') === -1) { return; }
+      var status = window.SKAI_MLE_SERVER_BATCH_STATUS || {};
+      var hasGuidedRequest = window.location.search.indexOf('mle_skai_batch=1') !== -1 || window.location.search.indexOf('mle_guided_mode=required') !== -1 || !!status.requested;
+      if (!hasGuidedRequest) { return; }
       var banner = document.getElementById('skai-mle-batch-context-banner');
       var bannerText = document.getElementById('skai-mle-batch-context-text');
       if (!banner || !bannerText) { return; }
@@ -59730,10 +59748,10 @@ document.addEventListener('DOMContentLoaded', function () {
       banner.style.background = '#fffbeb';
       banner.style.borderColor = '#fde68a';
       banner.style.color = '#92400e';
-      var status = window.SKAI_MLE_SERVER_BATCH_STATUS || {};
       var reason = status.reason ? String(status.reason) : 'unknown';
       var rows = (typeof status.row_count !== 'undefined') ? String(status.row_count) : '0';
-      bannerText.innerHTML = '<strong>Batch link detected, but the 9 saved MyLottoExpert runs were not loaded.</strong> SKAI looked for this batch and found ' + rows + ' runnable row(s). Reason: ' + skaiMleEsc(reason) + '. Go back to MyLottoExpert and open the batch again, create a fresh batch, or cancel guided mode if you intentionally want a single manual SKAI run.';
+      var warningMessage = status.warning_message ? String(status.warning_message) : '';
+      bannerText.innerHTML = '<strong>Batch link detected, but the requested guided MyLottoExpert batch was not loaded.</strong> SKAI looked for this batch and found ' + rows + ' runnable row(s). Reason: ' + skaiMleEsc(reason) + '. ' + (warningMessage ? skaiMleEsc(warningMessage) + ' ' : '') + 'Go back to MyLottoExpert and open a fresh tracked batch.';
       var guidedActions = document.getElementById('skai-mle-guided-actions');
       if (guidedActions && skaiMleGuidedRequired() && !skaiMleGuidedCancelled()) { guidedActions.style.display = 'flex'; }
     } catch (_) {}

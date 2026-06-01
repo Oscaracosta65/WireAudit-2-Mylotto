@@ -200,7 +200,6 @@
   function submitCreateBatchForm(form, button){
     if (!form) { return false; }
     if (!qs('input[name="mle_action"][value="create_skai_batch"]', form)) { return false; }
-    try { form.setAttribute('target', '_blank'); } catch(e) {}
     try { form.setAttribute('data-mle-no-loading', '1'); } catch(e2) {}
     markStarted(button || form, 'Creating 9BATCH run...');
     if (typeof form.requestSubmit === 'function') {
@@ -215,6 +214,7 @@
     var plan;
     var card;
     var form;
+    var regularScope;
     if (!btn) { return null; }
     journey = closest(btn, '.mle-v38-user-journey');
     if (journey) {
@@ -230,6 +230,15 @@
     if (card && (plan === 'prediction_9_batch' || plan === 'settings_batch' || plan === 'settings_ready_batch' || plan === 'next_settings' || plan === 'precision_batch')) {
       form = qs('form.mle-next-settings-run__form, form.mle-skai-batch-test__form, form.mle-v38-batch-action-form[data-mle-v38-batch-action-form="settings"]', card);
       if (form) { return form; }
+    }
+    if (card && (plan === 'regular_skai_batch' || plan === 'regular_skai' || isRegularSkaiButton(btn))) {
+      form = qs('form.mle-regular-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', card);
+      if (form) { return form; }
+      regularScope = qs('form input[name="mle_action"][value="create_skai_batch"]', card);
+      if (regularScope && regularScope.form) {
+        form = regularScope.form;
+        if (qs('input[name="mle_batch_plan"][value="regular_9_batch"], input[name="mle_batch_plan"][value="regular"], input[name="mle_batch_plan"][value="regular_skai_batch"]', form)) { return form; }
+      }
     }
     return null;
   }
@@ -264,7 +273,23 @@
       url = el.getAttribute('data-skai-url') || el.getAttribute('href') || '';
       precision = true;
       storePrecisionPayload(el);
-    } else if (isRegularSkaiButton(el) || action === 'open-skai' || action === 'regular_skai_batch' || action === 'regular_skai') {
+    } else if (isRegularSkaiButton(el) || action === 'regular_skai_batch' || action === 'regular_skai') {
+      form = findInlineBatchForm(el);
+      if (form) {
+        ev.preventDefault();
+        if (ev.stopPropagation) { ev.stopPropagation(); }
+        if (ev.stopImmediatePropagation) { ev.stopImmediatePropagation(); }
+        submitCreateBatchForm(form, qs('[data-nine-batch-submit="1"],button[type="submit"],input[type="submit"]', form) || el);
+        return;
+      }
+      ev.preventDefault();
+      if (ev.stopPropagation) { ev.stopPropagation(); }
+      if (ev.stopImmediatePropagation) { ev.stopImmediatePropagation(); }
+      restoreHandoffButton(el);
+      clearSkaiHandoffLoading();
+      if (window.alert) { window.alert('The 9-run batch form is missing. Please refresh and try again.'); }
+      return;
+    } else if (action === 'open-skai') {
       url = el.getAttribute('data-skai-regular-url') || el.getAttribute('data-skai-url') || el.getAttribute('href') || '';
       precision = false;
       if (!url) {
@@ -351,7 +376,7 @@
       qsa('.lottery-collapse-toggle,[data-lottery-toggle-btn]', group).forEach(function(b){b.textContent='Open';b.setAttribute('aria-expanded','true');b.setAttribute('aria-label','Lottery card is open');});
     });
   }
-  window.mleForceLotteryCardsOpen=openLotteryCards;
+  window.mleForceLotteryCardsOpen=function(){ return false; };
   clearCollapsedStorage();
   if (document.readyState==='loading') { document.addEventListener('DOMContentLoaded', function(){clearCollapsedStorage();openLotteryCards();}); }
   else { clearCollapsedStorage();openLotteryCards(); }
@@ -3401,7 +3426,17 @@ if (window.location.search && window.location.search.indexOf('debug_pred_results
 }());
 
 function skaiLotteryToggle(btn) {
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
+  if (!btn || !btn.closest) { return false; }
+  var group = btn.closest('.lottery-group');
+  var outer = btn.closest('.mle-lottery-outer');
+  if (group) {
+    skaiLotterySetOneGroup(group, !group.classList.contains('collapsed'));
+    return false;
+  }
+  if (outer) {
+    skaiLotterySetOneOuter(outer, !outer.classList.contains('body-collapsed'));
+    return false;
+  }
   return false;
 }
 
@@ -3415,14 +3450,18 @@ function skaiLotterySyncAllButtons(collapsed) {
 }
 
 function skaiLotterySetAllState(shouldCollapse) {
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
-  if (typeof skaiLotterySyncAllButtons === 'function') { skaiLotterySyncAllButtons(false); }
+  var outers = document.querySelectorAll('.mle-lottery-outer');
+  var groups = document.querySelectorAll('.lottery-group');
+  var i;
+  shouldCollapse = !!shouldCollapse;
+  for (i = 0; i < outers.length; i++) { skaiLotterySetOneOuter(outers[i], shouldCollapse); }
+  for (i = 0; i < groups.length; i++) { skaiLotterySetOneGroup(groups[i], shouldCollapse); }
+  if (typeof skaiLotterySyncAllButtons === 'function') { skaiLotterySyncAllButtons(shouldCollapse); }
   return false;
 }
 
 function skaiLotteryCollapseAll(shouldCollapse) {
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
-  return false;
+  return skaiLotterySetAllState(!!shouldCollapse);
 }
 
 function mleV126SubmitNextSettingsAction(el, card, target) {
@@ -3712,23 +3751,52 @@ function mleStrategicJump(link) {
 }
 
 function skaiLotterySetOneOuter(outerEl, shouldCollapse) {
+  var body;
+  var btns;
+  var i;
   if (!outerEl) { return; }
-  outerEl.classList.remove('body-collapsed','collapsed');
-  outerEl.setAttribute('aria-expanded','true');
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
+  body = outerEl.querySelector('.mle-lottery-outer-body');
+  btns = outerEl.querySelectorAll('.mle-lottery-outer-toggle,[data-outer-lottery-toggle-btn]');
+  if (shouldCollapse) {
+    outerEl.classList.add('body-collapsed');
+    outerEl.classList.add('collapsed');
+    outerEl.setAttribute('aria-expanded','false');
+    if (body) { body.setAttribute('hidden','hidden'); body.style.display = 'none'; }
+    for (i = 0; i < btns.length; i++) { btns[i].textContent = 'Expand'; btns[i].setAttribute('aria-expanded','false'); btns[i].setAttribute('aria-label','Expand lottery section'); }
+  } else {
+    outerEl.classList.remove('body-collapsed','collapsed');
+    outerEl.setAttribute('aria-expanded','true');
+    if (body) { body.removeAttribute('hidden'); body.style.display = ''; }
+    for (i = 0; i < btns.length; i++) { btns[i].textContent = 'Collapse'; btns[i].setAttribute('aria-expanded','true'); btns[i].setAttribute('aria-label','Collapse lottery section'); }
+  }
 }
 
 function skaiLotterySetOneGroup(group, shouldCollapse) {
+  var body;
+  var btns;
+  var i;
   if (!group) { return; }
-  group.classList.remove('collapsed');
-  group.setAttribute('aria-expanded','true');
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
+  body = group.querySelector('.lottery-collapsible-content');
+  btns = group.querySelectorAll('.lottery-collapse-toggle,[data-lottery-toggle-btn]');
+  if (shouldCollapse) {
+    group.classList.add('collapsed');
+    group.setAttribute('aria-expanded','false');
+    if (body) { body.setAttribute('hidden','hidden'); body.style.display = 'none'; }
+    for (i = 0; i < btns.length; i++) { btns[i].textContent = 'Open'; btns[i].setAttribute('aria-expanded','false'); btns[i].setAttribute('aria-label','Expand lottery section'); }
+  } else {
+    group.classList.remove('collapsed');
+    group.setAttribute('aria-expanded','true');
+    if (body) { body.removeAttribute('hidden'); body.style.display = ''; }
+    for (i = 0; i < btns.length; i++) { btns[i].textContent = 'Collapse'; btns[i].setAttribute('aria-expanded','true'); btns[i].setAttribute('aria-label','Collapse lottery section'); }
+  }
 }
 
 function skaiLotteryToggleAll(btn) {
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
-  if (typeof skaiLotterySyncAllButtons === 'function') { skaiLotterySyncAllButtons(false); }
-  return false;
+  var collapse = true;
+  if (btn && btn.getAttribute) {
+    collapse = String(btn.getAttribute('aria-expanded') || 'true') === 'true';
+  }
+  return skaiLotterySetAllState(collapse);
 }
 
 (function initRunSelector() {

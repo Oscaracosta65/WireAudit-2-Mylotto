@@ -23960,6 +23960,53 @@ if (!function_exists('mylottoexpertArrayMaxIntValue')) {
     }
 }
 
+if (!function_exists('mylottoexpertResolveUpcomingDrawScope')) {
+    function mylottoexpertResolveUpcomingDrawScope(array $card)
+    {
+        $date = '';
+        $drawAt = '';
+        foreach (array('next_draw_date','target_draw_date','upcoming_draw_date') as $key) {
+            $raw = trim((string)($card[$key] ?? ''));
+            if ($raw !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', substr($raw, 0, 10))) {
+                $date = substr($raw, 0, 10);
+                break;
+            }
+        }
+        foreach (array('next_draw_at','target_draw_at','upcoming_draw_at') as $key) {
+            $rawAt = trim((string)($card[$key] ?? ''));
+            if ($rawAt !== '' && strncmp($rawAt, '0000-00-00', 10) !== 0) {
+                $drawAt = $rawAt;
+                break;
+            }
+        }
+        $visual = is_array($card['visual_runs'] ?? null) ? (array)$card['visual_runs'] : array();
+        $visualUpcoming = (isset($visual['upcoming']) && is_array($visual['upcoming'])) ? (array)$visual['upcoming'] : array();
+        if ($date === '' && is_array($visualUpcoming)) {
+            foreach ($visualUpcoming as $row) {
+                foreach (array('target_draw_date','next_draw_date','draw_date') as $drawKey) {
+                    $rawDate = trim((string)($row[$drawKey] ?? ''));
+                    if ($rawDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', substr($rawDate, 0, 10))) {
+                        $date = substr($rawDate, 0, 10);
+                        break 2;
+                    }
+                }
+            }
+        }
+        if ($drawAt === '' && is_array($visualUpcoming)) {
+            foreach ($visualUpcoming as $row) {
+                foreach (array('target_draw_at','next_draw_at','draw_at') as $drawAtKey) {
+                    $rawDrawAt = trim((string)($row[$drawAtKey] ?? ''));
+                    if ($rawDrawAt !== '' && strncmp($rawDrawAt, '0000-00-00', 10) !== 0) {
+                        $drawAt = $rawDrawAt;
+                        break 2;
+                    }
+                }
+            }
+        }
+        return array('date' => $date, 'draw_at' => $drawAt);
+    }
+}
+
 if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
     function mylottoexpertDatabasePendingRunCount($db, $userId, array $card)
     {
@@ -24010,20 +24057,30 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
                 }
             }
 
+            $upcoming = mylottoexpertResolveUpcomingDrawScope($card);
+            $upcomingDate = trim((string)($upcoming['date'] ?? ''));
+            if ($upcomingDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $upcomingDate)) { return 0; }
+            $upcomingDrawAt = trim((string)($upcoming['draw_at'] ?? ''));
+            $nowTs = time();
+            if ($upcomingDrawAt !== '' && strncmp($upcomingDrawAt, '0000-00-00', 10) !== 0) {
+                $upcomingTs = strtotime($upcomingDrawAt);
+                if ($upcomingTs && $upcomingTs < $nowTs) { return 0; }
+            }
+
             $drawParts = array();
             foreach (array('target_draw_date','next_draw_date','draw_date') as $drawCol) {
                 if ($hasCol($drawCol)) { $drawParts[] = 'NULLIF(' . $qn($drawCol) . ', ' . $db->quote('0000-00-00') . ')'; }
             }
             $drawExpr = !empty($drawParts) ? 'COALESCE(' . implode(',', $drawParts) . ')' : 'NULL';
-
-            $activityParts = array();
-            foreach (array('updated_at','generated_at','date_saved','created_at') as $activityCol) {
-                if ($hasCol($activityCol)) { $activityParts[] = 'NULLIF(' . $qn($activityCol) . ', ' . $db->quote('0000-00-00 00:00:00') . ')'; }
+            $where[] = '((' . $drawExpr . ') IS NOT NULL AND DATE(' . $drawExpr . ') = ' . $db->quote($upcomingDate) . ')';
+            $drawAtParts = array();
+            foreach (array('target_draw_at','next_draw_at','draw_at') as $drawAtCol) {
+                if ($hasCol($drawAtCol)) { $drawAtParts[] = 'NULLIF(' . $qn($drawAtCol) . ', ' . $db->quote('0000-00-00 00:00:00') . ')'; }
             }
-            $activityExpr = !empty($activityParts) ? 'COALESCE(' . implode(',', $activityParts) . ')' : 'NULL';
-
-            $where[] = '(((' . $drawExpr . ') IS NOT NULL AND DATE(' . $drawExpr . ') >= CURDATE())'
-                . ' OR (((' . $drawExpr . ') IS NULL OR DATE(' . $drawExpr . ') < CURDATE()) AND (' . $activityExpr . ') IS NOT NULL AND (' . $activityExpr . ') >= DATE_SUB(NOW(), INTERVAL 72 HOUR)))';
+            if (!empty($drawAtParts) && $upcomingDate === date('Y-m-d')) {
+                $drawAtExpr = 'COALESCE(' . implode(',', $drawAtParts) . ')';
+                $where[] = '((' . $drawAtExpr . ') IS NULL OR (' . $drawAtExpr . ') >= NOW())';
+            }
 
             $idExpr = $hasCol('id') ? 'COUNT(DISTINCT ' . $qn('id') . ')' : 'COUNT(*)';
             $query = 'SELECT ' . $idExpr . ' FROM ' . $db->quoteName($table) . ' WHERE ' . implode(' AND ', $where);
@@ -24040,11 +24097,31 @@ if (!function_exists('mylottoexpertCanonicalPendingRunCount')) {
     function mylottoexpertCanonicalPendingRunCount(array $card)
     {
         $visual = is_array($card['visual_runs'] ?? null) ? (array)$card['visual_runs'] : array();
+        $upcoming = mylottoexpertResolveUpcomingDrawScope($card);
+        $upcomingDate = trim((string)($upcoming['date'] ?? ''));
+        $upcomingDrawAt = trim((string)($upcoming['draw_at'] ?? ''));
         $visualCount = 0;
         $hasVisualUpcoming = false;
         if (array_key_exists('upcoming', $visual) && is_array($visual['upcoming'])) {
             $hasVisualUpcoming = true;
-            $visualCount = max(0, count((array)$visual['upcoming']));
+            foreach ((array)$visual['upcoming'] as $vrow) {
+                $drawDate = '';
+                foreach (array('target_draw_date','next_draw_date','draw_date') as $drawKey) {
+                    $drawRaw = trim((string)($vrow[$drawKey] ?? ''));
+                    if ($drawRaw !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', substr($drawRaw, 0, 10))) { $drawDate = substr($drawRaw, 0, 10); break; }
+                }
+                if ($upcomingDate === '' || $drawDate !== $upcomingDate) { continue; }
+                if ($upcomingDate === date('Y-m-d')) {
+                    $rowDrawAt = '';
+                    foreach (array('target_draw_at','next_draw_at','draw_at') as $drawAtKey) {
+                        $drawAtRaw = trim((string)($vrow[$drawAtKey] ?? ''));
+                        if ($drawAtRaw !== '' && strncmp($drawAtRaw, '0000-00-00', 10) !== 0) { $rowDrawAt = $drawAtRaw; break; }
+                    }
+                    if ($rowDrawAt === '') { $rowDrawAt = $upcomingDrawAt; }
+                    if ($rowDrawAt !== '' && strtotime($rowDrawAt) && strtotime($rowDrawAt) < time()) { continue; }
+                }
+                $visualCount++;
+            }
         }
         $dbCount = array_key_exists('mle_db_pending_runs', $card) ? (int)$card['mle_db_pending_runs'] : -1;
         $summary = is_array($card['prediction_summary'] ?? null) ? (array)$card['prediction_summary'] : array();
@@ -24052,6 +24129,9 @@ if (!function_exists('mylottoexpertCanonicalPendingRunCount')) {
         $summaryCount = max(0, (int)($summary['pending_runs'] ?? 0));
         $progressCount = max(0, (int)($progress['pending_runs'] ?? 0));
 
+        if ($upcomingDate === '') {
+            return ($dbCount >= 0) ? max(0, $dbCount) : 0;
+        }
         if ($visualCount > 0 || $dbCount > 0) {
             return mylottoexpertArrayMaxIntValue(array($visualCount, $dbCount));
         }
@@ -25641,13 +25721,35 @@ if ($__mleAction === 'create_skai_batch') {
 
     $__batchForceNextSettings = ((int)$app->input->getInt('mle_force_next_batch', 0) === 1);
     $__batchRequestedPlan = strtolower(trim((string)$app->input->getCmd('mle_batch_plan', 'recommended')));
-    if (!in_array($__batchRequestedPlan, array('recommended','horizon','settings','precision'), true)) {
+    $__batchPlanAliases = array(
+        'precision' => 'settings',
+        'regular' => 'regular_9_batch',
+        'regular_batch' => 'regular_9_batch',
+        'regular_skai_batch' => 'regular_9_batch',
+        'regular_skai' => 'regular_9_batch',
+        'regular_9_batch' => 'regular_9_batch'
+    );
+    if (isset($__batchPlanAliases[$__batchRequestedPlan])) {
+        $__batchRequestedPlan = (string)$__batchPlanAliases[$__batchRequestedPlan];
+    }
+    if (!in_array($__batchRequestedPlan, array('recommended','horizon','settings','regular_9_batch'), true)) {
         $__batchRequestedPlan = 'recommended';
     }
-    if ($__batchRequestedPlan === 'precision') {
-        $__batchRequestedPlan = 'settings';
-    }
     $__batchRows = is_array($__batchActive[$__batchLotteryId]['rows'] ?? null) ? $__batchActive[$__batchLotteryId]['rows'] : array();
+    $__batchTargetDrawDate = trim((string)$app->input->getString('target_draw_date', ''));
+    if ($__batchTargetDrawDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $__batchTargetDrawDate)) {
+        $__batchTargetDrawDate = '';
+    }
+    if ($__batchTargetDrawDate === '') {
+        foreach ($__batchRows as $__batchDateRow) {
+            $__batchDateCandidate = trim((string)($__batchDateRow['target_draw_date'] ?? $__batchDateRow['next_draw_date'] ?? ''));
+            if ($__batchDateCandidate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $__batchDateCandidate)) {
+                $__batchTargetDrawDate = $__batchDateCandidate;
+                break;
+            }
+        }
+        unset($__batchDateRow, $__batchDateCandidate);
+    }
 
     $__batchSharedProfile = function_exists('mylottoexpertBuildAndSaveSharedSkaiHistoryWindowProfile') ? mylottoexpertBuildAndSaveSharedSkaiHistoryWindowProfile($db, $__batchLotteryId, $__batchRows) : array();
     $__batchGlobalIntel = is_array($__batchSharedProfile['global_settings_intelligence'] ?? null) ? $__batchSharedProfile['global_settings_intelligence'] : array();
@@ -25721,18 +25823,74 @@ if ($__mleAction === 'create_skai_batch') {
         }
     }
 
-    if ($__batchRequestedPlan === 'horizon') {
+    if ($__batchRequestedPlan === 'regular_9_batch') {
+        $__batchRegularAdvice = $__batchSettingsAdv;
+        if (empty($__batchRegularAdvice['has_advice'])) {
+            $__batchRegularAdvice = mylottoexpertV97BuildBaselineSettingsAdvice($__batchGlobalIntel);
+        }
+        $__batchRegularSettingKey = trim((string)($__batchRegularAdvice['setting'] ?? 'skai_blend_ai_pct'));
+        if ($__batchRegularSettingKey === '') { $__batchRegularSettingKey = 'skai_blend_ai_pct'; }
+        $__batchRegularSettingLabel = trim((string)($__batchRegularAdvice['setting_label'] ?? 'Global learning blend'));
+        if ($__batchRegularSettingLabel === '') { $__batchRegularSettingLabel = 'Global learning blend'; }
+        $__batchRegularCurrent = trim((string)($__batchRegularAdvice['current_value'] ?? $__batchRegularAdvice['suggested_value'] ?? '50'));
+        $__batchRegularSuggested = trim((string)($__batchRegularAdvice['suggested_value'] ?? $__batchRegularCurrent));
+        $__batchRegularMin = isset($__batchRegularAdvice['range_min']) ? (float)$__batchRegularAdvice['range_min'] : 0.0;
+        $__batchRegularMax = isset($__batchRegularAdvice['range_max']) ? (float)$__batchRegularAdvice['range_max'] : 100.0;
+        if ($__batchRegularMax <= $__batchRegularMin) { $__batchRegularMin = 0.0; $__batchRegularMax = 100.0; }
+        $__batchRegularValueType = in_array($__batchRegularSettingKey, array('diversity_penalty','sampling_temperature','recency_decay','learning_rate','dropout_rate','gap_scale'), true) ? 'decimal' : 'integer';
+        $__batchRegularValueResult = mleAdvisoryGenerateEightDistinctBatchValues($__batchRegularMin, $__batchRegularMax, $__batchRegularSuggested, $__batchRegularValueType);
+        if (empty($__batchRegularValueResult['ok']) || count((array)($__batchRegularValueResult['values'] ?? array())) !== 8) {
+            $app->enqueueMessage('Regular 9-run batch could not be created for this lottery yet. Please refresh and try again.', 'warning');
+            $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+            return;
+        }
+        $__batchRegularValues = (array)$__batchRegularValueResult['values'];
+        $__batchRegularRunValues = array($__batchRegularCurrent !== '' ? $__batchRegularCurrent : '');
+        $__batchRegularRunLabels = array('Control - Current Best Global Settings');
+        for ($__batchRegularIdx = 0; $__batchRegularIdx < 8; $__batchRegularIdx++) {
+            $__batchRegularValueText = mleAdvisoryNormalizeBatchValue($__batchRegularValues[$__batchRegularIdx], $__batchRegularValueType);
+            $__batchRegularRunValues[] = $__batchRegularValueText;
+            $__batchRegularRunLabels[] = 'Test ' . ($__batchRegularIdx + 1) . ' - ' . $__batchRegularSettingLabel . ' ' . $__batchRegularValueText;
+        }
+        unset($__batchRegularIdx, $__batchRegularValueText);
+        $__batchPlan = array(
+            'has_recommendation' => true,
+            'title' => 'Regular SKAI Global Learning 9-Run Batch',
+            'summary' => 'Build a tracked regular global-learning batch from the best currently available settings for this lottery.',
+            'guardrail' => 'Run and save all 9 runs, then wait for the official draw so MyLottoExpert can score and learn from this batch.',
+            'evidence_line' => 'Using best available current global/Hive settings evidence for this lottery.',
+            'batch_purpose' => 'Create tracked regular evidence for the next draw using one control plus eight bracketed tests.',
+            'locked_settings' => 'Keep all other SKAI settings stable while this regular global-learning batch runs.',
+            'test_variable' => $__batchRegularSettingLabel,
+            'setting_key' => $__batchRegularSettingKey,
+            'setting_key_aliases' => array($__batchRegularSettingKey),
+            'control_run' => 'Control - Current Best Global Settings',
+            'control_source' => (string)($__batchRegularAdvice['source'] ?? 'best_available_global_hive'),
+            'batch_runs' => $__batchRegularRunLabels,
+            'batch_run_values' => $__batchRegularRunValues,
+            'range_basis' => $__batchRegularSettingLabel,
+            'range_min' => $__batchRegularMin,
+            'range_max' => $__batchRegularMax,
+            'recommended_value' => $__batchRegularSuggested,
+            'preferred_use' => 'Regular evidence-building batch for this lottery.',
+            'milestone_supported' => 'Regular 9-run evidence cycle',
+            'batch_type' => 'Regular Global Learning 9-Run Batch',
+            'global_source_rows' => (int)($__batchGlobalIntel['usable_rows'] ?? 0),
+            'global_source_users' => (int)($__batchGlobalIntel['users'] ?? 0),
+            'global_source_draws' => (int)($__batchGlobalIntel['draws'] ?? 0),
+            'source_evidence' => array(
+                'settings_source' => (string)($__batchRegularAdvice['source'] ?? ''),
+                'settings_source_detail' => (string)($__batchRegularAdvice['source_detail'] ?? ''),
+                'confidence' => (string)($__batchRegularAdvice['confidence'] ?? ''),
+                'evidence_count' => (int)($__batchRegularAdvice['evidence_count'] ?? 0),
+                'hive_settings_fingerprint' => (string)($__batchRegularAdvice['hive_settings_fingerprint'] ?? '')
+            )
+        );
+    } elseif ($__batchRequestedPlan === 'horizon') {
         $__batchPlan = $__batchHorizonPlanForPhase;
         if (empty($__batchPlan['has_recommendation'])) {
-
-            $__historyNotReadyMessage = (string)($__batchPlan['fail_reason'] ?? 'History Window is not ready yet for this lottery.');
-            $__historyRegularSkaiUrl = mleAdvisoryResolveSkaiRegularRunUrl($db, $__batchLotteryId);
-            if (trim((string)$__historyRegularSkaiUrl) !== '') {
-                $app->enqueueMessage($__historyNotReadyMessage . ' Build more daily SKAI evidence first; opening the regular SKAI run page now.', 'warning');
-                $app->redirect($__historyRegularSkaiUrl);
-                return;
-            }
-            $app->enqueueMessage($__historyNotReadyMessage, 'error');
+            $__historyNotReadyMessage = (string)($__batchPlan['fail_reason'] ?? 'History-window batch is not ready for this lottery yet. Run a regular 9-run batch or wait for more scored evidence.');
+            $app->enqueueMessage($__historyNotReadyMessage, 'warning');
             $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
             return;
         }
@@ -25819,7 +25977,7 @@ if ($__mleAction === 'create_skai_batch') {
     $__batchLotteryName = (string)($__batchActive[$__batchLotteryId]['lottery_name'] ?? '');
     $__batchTestVar = (string)($__batchPlan['test_variable'] ?? '');
     $__batchSettingKey = (string)($__batchPlan['setting_key'] ?? '');
-    $__batchTypeLabel = (string)($__batchPlan['batch_type'] ?? ($__batchForceNextSettings ? 'Next Settings 9-Run Batch' : 'Precision Focus Batch'));
+    $__batchTypeLabel = (string)($__batchPlan['batch_type'] ?? ($__batchForceNextSettings ? 'Next Settings 9-Run Batch' : (($__batchRequestedPlan === 'regular_9_batch') ? 'Regular Global Learning 9-Run Batch' : 'Precision Focus Batch')));
     $__batchRangeMinForSave = array_key_exists('range_min', $__batchPlan) ? (float)$__batchPlan['range_min'] : (float)($__batchPrecisionLock['range_min'] ?? 0);
     $__batchRangeMaxForSave = array_key_exists('range_max', $__batchPlan) ? (float)$__batchPlan['range_max'] : (float)($__batchPrecisionLock['range_max'] ?? 100);
     $__batchRecommendedForSave = (string)($__batchPlan['recommended_value'] ?? ($__batchSettingsAdv['suggested_value'] ?? ''));
@@ -25846,6 +26004,8 @@ if ($__mleAction === 'create_skai_batch') {
             $__batchNamePrefix = 'History Horizon SKAI Batch - ';
         } elseif ($__batchTypeLabel === 'Precision Focus Batch') {
             $__batchNamePrefix = 'Precision Focus SKAI Batch - ';
+        } elseif ($__batchTypeLabel === 'Regular Global Learning 9-Run Batch') {
+            $__batchNamePrefix = 'Regular SKAI 9-Run Batch - ';
         }
         $db->setQuery(
             "INSERT INTO `{$__batchHeaderTable}` (`user_id`,`lottery_id`,`lottery_name`,`batch_name`,`batch_source`,`batch_type`,`source_page`,`status`,`test_variable`,`range_min`,`range_max`,`recommended_value`,`precision_lock_stage`,`recommendation_level`,`precision_progress_level`,`evidence_summary`,`base_settings_id`,`locked_settings_id`,`created_at`) VALUES ("
@@ -25875,6 +26035,7 @@ if ($__mleAction === 'create_skai_batch') {
         if ($__batchHeaderId <= 0) { throw new \RuntimeException('Batch header was not saved.'); }
         $__batchResearchAssignmentId = mylottoexpertV97CreateResearchAssignment($db, $__batchResearchQueueId, $workspaceUserId, $__batchLotteryId, $__batchGameIdForResearch, $__batchHeaderId, $__batchNow);
         $__batchSource = (string)($__batchTopMethod['method'] ?? 'skai');
+        $__batchRunPhase = ($__batchRequestedPlan === 'horizon') ? 'horizon' : (($__batchRequestedPlan === 'regular_9_batch') ? 'regular' : 'settings');
         foreach ($__batchRunLabels as $__batchRunIdx => $__batchRunLabel) {
             $__batchRunOrder = $__batchRunIdx + 1;
             $__batchIsControl = ($__batchRunOrder === 1) ? 1 : 0;
@@ -25899,8 +26060,15 @@ if ($__mleAction === 'create_skai_batch') {
             }
 
             $__batchRunSettings = mylottoexpertApplyBatchOutputShapeSettings($__batchRunSettings);
-            $__batchRunSettings['_mle_batch_phase'] = ($__batchTypeLabel === 'History Horizon Discovery Batch') ? 'horizon' : 'settings';
+            $__batchRunSettings['_mle_batch_phase'] = $__batchRunPhase;
             $__batchRunSettings['_mle_evidence_display'] = 'top20_plus_playable';
+            $__batchRunSettings['game_id'] = (string)$__batchGameIdForResearch;
+            $__batchRunSettings['lottery_id'] = (int)$__batchLotteryId;
+            $__batchRunSettings['lottery_name'] = (string)$__batchLotteryName;
+            $__batchRunSettings['target_draw_date'] = (string)$__batchTargetDrawDate;
+            $__batchRunSettings['source'] = 'mylottoexpert';
+            $__batchRunSettings['batch_plan'] = (string)$__batchRequestedPlan;
+            $__batchRunSettings['mle_required_action'] = (string)$__batchRequestedPlan;
 
             $__batchRunSettings['_mle_global_learning_scope'] = 'exact_lottery_only';
             $__batchRunSettings['_mle_global_learning_objective'] = 'learn_best_complete_settings_per_lottery';
@@ -25945,7 +26113,7 @@ if ($__mleAction === 'create_skai_batch') {
             );
             $db->execute();
         }
-        unset($__batchRunIdx, $__batchRunLabel, $__batchRunOrder, $__batchIsControl, $__batchRunSettings, $__batchRunTestValue, $__batchRunSettingsJson);
+        unset($__batchRunIdx, $__batchRunLabel, $__batchRunOrder, $__batchIsControl, $__batchRunSettings, $__batchRunTestValue, $__batchRunSettingsJson, $__batchRunPhase);
         $__batchOpenSkaiUrl = mleAdvisoryResolveSkaiBatchOpenUrl($db, $__batchLotteryId, $__batchHeaderId, $__batchTypeLabel);
         if (trim((string)$__batchOpenSkaiUrl) === '') {
             $__batchOpenSkaiUrl = mleAdvisoryBuildCanonicalSkaiLotteryUrl($db, $__batchLotteryId, array(
@@ -31526,7 +31694,9 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
             </button>
             <?php
               $__v38InlineBatchPlan = '';
-              if (!MLE_DEMO_MODE && $__v38ActionTargetEsc === 'history_window_check') {
+              if (!MLE_DEMO_MODE && ($__v38ActionTargetEsc === 'regular_skai_batch' || $__v38ActionTargetEsc === 'regular_skai')) {
+                  $__v38InlineBatchPlan = 'regular_9_batch';
+              } elseif (!MLE_DEMO_MODE && $__v38ActionTargetEsc === 'history_window_check') {
                   $__v38InlineBatchPlan = 'horizon';
               } elseif (!MLE_DEMO_MODE && $__v38ActionTargetEsc === 'prediction_9_batch') {
                   $__v38InlineBatchPlan = 'settings';
@@ -31534,14 +31704,18 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
             ?>
             <?php if ($__v38InlineBatchPlan !== ''): ?>
               <form method="post"
-                    class="mle-v38-batch-action-form"
+                    class="mle-v38-batch-action-form<?php echo $__v38InlineBatchPlan === 'regular_9_batch' ? ' mle-regular-batch-action-form' : ''; ?>"
                     target="_blank"
-                    data-mle-v38-batch-action-form="<?php echo htmlspecialchars($__v38InlineBatchPlan, ENT_QUOTES, 'UTF-8'); ?>"
+                    data-mle-v38-batch-action-form="<?php echo $__v38InlineBatchPlan === 'regular_9_batch' ? 'regular' : htmlspecialchars($__v38InlineBatchPlan, ENT_QUOTES, 'UTF-8'); ?>"
                     style="display:none;margin:0;">
                 <input type="hidden" name="mle_action" value="create_skai_batch">
                 <input type="hidden" name="mle_batch_plan" value="<?php echo htmlspecialchars($__v38InlineBatchPlan, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="mle_batch_phase" value="<?php echo htmlspecialchars($__v38InlineBatchPlan, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="lottery_id" value="<?php echo (int)$__advLid; ?>">
+                <input type="hidden" name="game_id" value="<?php echo htmlspecialchars((string)$__advSkaiGameIdAttr, ENT_QUOTES, 'UTF-8'); ?>">
+                <?php if (trim((string)$__advNextDrawRaw) !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim((string)$__advNextDrawRaw))): ?>
+                <input type="hidden" name="target_draw_date" value="<?php echo htmlspecialchars(trim((string)$__advNextDrawRaw), ENT_QUOTES, 'UTF-8'); ?>">
+                <?php endif; ?>
                 <?php echo \Joomla\CMS\HTML\HTMLHelper::_('form.token'); ?>
                 <button type="submit" data-nine-batch-submit="1"><?php echo $__v38StepCtaEsc; ?></button>
               </form>
@@ -32608,20 +32782,24 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
           <button type="button" class="mle-advisory-btn mle-advisory-btn--primary mle-section-shortcut-btn" data-target-section="<?php echo $__advNextRunSectionId; ?>" data-target-panel="<?php echo $__advNextRunSectionId; ?>" data-open-details="<?php echo $__advNextRunSectionId; ?>"><?php echo $__advSimpleStepCtaEsc; ?></button>
         <?php else: ?>
           <?php
-            $__simpleStepIsBatchCreate = !MLE_DEMO_MODE && in_array((string)($__advActionTargetMode ?? ''), array('history_window_check', 'prediction_9_batch'), true) && !$__advHasReadyPrecisionBatch;
-            $__simpleStepBatchPlan = ($__advActionTargetMode === 'history_window_check') ? 'horizon' : 'settings';
+            $__simpleStepIsBatchCreate = !MLE_DEMO_MODE && in_array((string)($__advActionTargetMode ?? ''), array('history_window_check', 'prediction_9_batch', 'regular_skai_batch', 'regular_skai'), true) && !$__advHasReadyPrecisionBatch;
+            $__simpleStepBatchPlan = ($__advActionTargetMode === 'history_window_check') ? 'horizon' : (($__advActionTargetMode === 'prediction_9_batch') ? 'settings' : 'regular_9_batch');
           ?>
           <button type="button" class="mle-advisory-btn mle-advisory-btn--primary mle-status-action-jump mle-section-shortcut-btn mle-regular-skai-batch-action-btn" data-action-target="<?php echo htmlspecialchars((string)($__advActionTargetMode ?? 'regular_skai'), ENT_QUOTES, 'UTF-8'); ?>" data-mle-no-loading="1" data-skai-regular-url="<?php echo $__advRegularSkaiUrl; ?>" data-skai-url="<?php echo $__advRegularSkaiUrl; ?>" data-game-id="<?php echo $__advSkaiGameIdAttr; ?>" data-st="<?php echo $__advSkaiStateCodeAttr; ?>" data-stn="<?php echo $__advSkaiStateNameAttr; ?>" data-gm="<?php echo $__advSkaiGameNameAttr; ?>"><?php echo $__advSimpleStepCtaEsc; ?></button>
           <?php if ($__simpleStepIsBatchCreate): ?>
           <form method="post"
-                class="mle-v38-batch-action-form"
+                class="mle-v38-batch-action-form<?php echo $__simpleStepBatchPlan === 'regular_9_batch' ? ' mle-regular-batch-action-form' : ''; ?>"
                 target="_blank"
-                data-mle-v38-batch-action-form="<?php echo htmlspecialchars($__simpleStepBatchPlan, ENT_QUOTES, 'UTF-8'); ?>"
+                data-mle-v38-batch-action-form="<?php echo $__simpleStepBatchPlan === 'regular_9_batch' ? 'regular' : htmlspecialchars($__simpleStepBatchPlan, ENT_QUOTES, 'UTF-8'); ?>"
                 style="display:none;margin:0;">
             <input type="hidden" name="mle_action" value="create_skai_batch">
             <input type="hidden" name="mle_batch_plan" value="<?php echo htmlspecialchars($__simpleStepBatchPlan, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="mle_batch_phase" value="<?php echo htmlspecialchars($__simpleStepBatchPlan, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="lottery_id" value="<?php echo (int)$__advLid; ?>">
+            <input type="hidden" name="game_id" value="<?php echo htmlspecialchars((string)$__advSkaiGameIdAttr, ENT_QUOTES, 'UTF-8'); ?>">
+            <?php if (trim((string)$__advNextDrawRaw) !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim((string)$__advNextDrawRaw))): ?>
+            <input type="hidden" name="target_draw_date" value="<?php echo htmlspecialchars(trim((string)$__advNextDrawRaw), ENT_QUOTES, 'UTF-8'); ?>">
+            <?php endif; ?>
             <?php echo \Joomla\CMS\HTML\HTMLHelper::_('form.token'); ?>
             <button type="submit" data-nine-batch-submit="1"><?php echo $__advSimpleStepCtaEsc; ?></button>
           </form>
@@ -35486,7 +35664,7 @@ function mylottoexpertExtractRegularSavedView($row)
 
     $result['play_main'] = array_slice(array_values(array_unique(array_map('intval', $result['play_main']))), 0, 20);
     $result['ranked_main'] = array_slice(array_values(array_unique(array_map('intval', $result['ranked_main']))), 0, 20);
-    if (count($result['ranked_main']) > count($result['main']) && count($result['ranked_main']) >= 10) {
+    if (count($result['ranked_main']) > count($result['main']) && count($result['ranked_main']) >= 6) {
         $result['main'] = $result['ranked_main'];
         $result['used_ranked_pool'] = true;
     }
@@ -45524,9 +45702,21 @@ The server-rendered phase state is now the source of truth.
     'use strict';
     function mleV128FindForm(btn) {
         var p = btn && btn.parentNode;
+        var card;
+        var nodes;
+        var row;
         if (!p) { return null; }
-        var nodes = p.querySelectorAll('form.mle-v38-batch-action-form');
-        return (nodes && nodes.length > 0) ? nodes[0] : null;
+        nodes = p.querySelectorAll('form.mle-v38-batch-action-form');
+        if (nodes && nodes.length > 0) { return nodes[0]; }
+        card = btn && btn.closest ? btn.closest('.mle-advisory-card') : null;
+        if (!card) { return null; }
+        nodes = card.querySelectorAll('form.mle-regular-batch-action-form, form[data-mle-v38-batch-action-form="regular"]');
+        if (nodes && nodes.length > 0) { return nodes[0]; }
+        row = card.querySelector('input[name="mle_action"][value="create_skai_batch"]');
+        if (row && row.form && row.form.querySelector('input[name="mle_batch_plan"][value="regular_9_batch"], input[name="mle_batch_plan"][value="regular"], input[name="mle_batch_plan"][value="regular_skai_batch"]')) {
+            return row.form;
+        }
+        return null;
     }
     function mleV128WireBtn(btn) {
         var at = btn.getAttribute('data-action-target') || '';
@@ -45537,8 +45727,14 @@ The server-rendered phase state is now the source of truth.
             }, false);
         } else if (at === 'regular_skai_batch' || at === 'regular_skai') {
             btn.addEventListener('click', function () {
-                var u = btn.getAttribute('data-skai-regular-url') || btn.getAttribute('data-skai-url') || '';
-                if (u) { window.open(u, '_blank'); }
+                var f = mleV128FindForm(btn);
+                if (f) {
+                    try { f.setAttribute('data-mle-no-loading', '1'); } catch (e1) {}
+                    if (typeof f.requestSubmit === 'function') { f.requestSubmit(); }
+                    else { f.submit(); }
+                    return;
+                }
+                if (window.alert) { window.alert('The 9-run batch form is missing. Please refresh and try again.'); }
             }, false);
         }
     }
