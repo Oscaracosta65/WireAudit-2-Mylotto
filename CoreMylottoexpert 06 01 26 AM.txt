@@ -24046,7 +24046,15 @@ if (!function_exists('mylottoexpertResolveUpcomingDrawScope')) {
 }
 
 if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
-    function mylottoexpertDatabasePendingRunCount($db, $userId, array $card)
+    /* [[MLE_V5_DB_PENDING_IDENTITY_2026_06_01]]
+       $requireIdentity = true adds a saved-run identity guard to the query:
+       the row must have at least one of run_uuid, batch_uuid, source_batch_id,
+       source_batch_run_id, prediction_target_id, or prediction_target_key set.
+       This eliminates false-pending rows produced by bucket-summary or
+       advisory-summarize logic that do not represent actual saved run records.
+       Passing false (default) preserves the existing behaviour for all other
+       callers such as bottom-card sync. */
+    function mylottoexpertDatabasePendingRunCount($db, $userId, array $card, $requireIdentity = false)
     {
         $userId = (int)$userId;
         $lotteryId = (int)($card['lottery_id'] ?? 0);
@@ -24118,6 +24126,25 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
             if (!empty($drawAtParts) && $upcomingDate === date('Y-m-d')) {
                 $drawAtExpr = 'COALESCE(' . implode(',', $drawAtParts) . ')';
                 $where[] = '((' . $drawAtExpr . ') IS NULL OR (' . $drawAtExpr . ') >= NOW())';
+            }
+
+            if ($requireIdentity) {
+                /* Exclude strategy_set rows (they are strategy/play-set records, not runs). */
+                if ($hasCol('source')) {
+                    $where[] = '(LOWER(TRIM(' . $qn('source') . ")) <> 'strategy_set')";
+                }
+                /* Require at least one saved-run identity marker so that bucket-summary
+                   or advisory-aggregate rows without real run identity are excluded. */
+                $identityParts = array();
+                if ($hasCol('run_uuid'))             { $identityParts[] = "(TRIM(COALESCE(" . $qn('run_uuid')             . ",'')) <> '')"; }
+                if ($hasCol('batch_uuid'))           { $identityParts[] = "(TRIM(COALESCE(" . $qn('batch_uuid')           . ",'')) <> '')"; }
+                if ($hasCol('source_batch_id'))      { $identityParts[] = "(COALESCE("      . $qn('source_batch_id')      . ",0) > 0)"; }
+                if ($hasCol('source_batch_run_id'))  { $identityParts[] = "(COALESCE("      . $qn('source_batch_run_id')  . ",0) > 0)"; }
+                if ($hasCol('prediction_target_id')) { $identityParts[] = "(TRIM(COALESCE(" . $qn('prediction_target_id') . ",'')) <> '')"; }
+                if ($hasCol('prediction_target_key')){ $identityParts[] = "(TRIM(COALESCE(" . $qn('prediction_target_key'). ",'')) <> '')"; }
+                if (!empty($identityParts)) {
+                    $where[] = '(' . implode(' OR ', $identityParts) . ')';
+                }
             }
 
             $idExpr = $hasCol('id') ? 'COUNT(DISTINCT ' . $qn('id') . ')' : 'COUNT(*)';
@@ -29255,41 +29282,48 @@ if (!empty($__mleAdvCards)) {
     }
     unset($__mleBriefFullCard, $__mleBriefFullLid, $__mleBriefDidReplace, $__mleBriefSrcIdx, $__mleBriefSrcCard);
 }
-/* Top cards can come from selector summary payloads, so pending must be keyed by
-   lottery_id and not derived only from whichever full card is currently selected. */
-$__mlePendingByLotteryId = array();
-$__mlePendingScopeByLotteryId = array();
-$__mlePendingFullByLotteryId = array();
+/* [[MLE_V5_STRICT_PENDING_MAP_2026_06_01]]
+   Build a strict DB-only pending map keyed by lottery_id for all visible top
+   cards. This map is the authoritative source for both per-card pending counts
+   and the global $__mleBriefTotals['pending'] total.
+
+   Rules enforced:
+   - Source is #__user_saved_numbers (real saved runs only).
+   - Requires a valid upcoming draw date for the lottery; 0 pending otherwise.
+   - Does NOT fall back to selector prediction_summary.pending_runs.
+   - Passes $requireIdentity = true: each counted row must carry at least one
+     of run_uuid, batch_uuid, source_batch_id, source_batch_run_id,
+     prediction_target_id, or prediction_target_key. This prevents false
+     pending counts from bucket-summary or advisory-aggregate rows.
+   - strategy_set source rows are excluded.
+   - When the DB query returns null (connection unavailable), pending is 0. */
+$__mleStrictPendingByLotteryId = array();
+$__mleStrictPendingScopeByLotteryId = array();
+$__mleStrictPendingFullByLotteryId = array();
 foreach ((array)$__mleAdvCards as $__mlePendingFullCardRaw) {
     $__mlePendingFullLid = (int)($__mlePendingFullCardRaw['lottery_id'] ?? 0);
     if ($__mlePendingFullLid <= 0) { continue; }
-    $__mlePendingFullByLotteryId[$__mlePendingFullLid] = (array)$__mlePendingFullCardRaw;
+    $__mleStrictPendingFullByLotteryId[$__mlePendingFullLid] = (array)$__mlePendingFullCardRaw;
 }
 foreach ((array)$__mleBriefSourceCards as $__mlePendingCardRaw) {
     $__mlePendingLid = (int)($__mlePendingCardRaw['lottery_id'] ?? 0);
     if ($__mlePendingLid <= 0) { continue; }
     $__mlePendingScopeCard = (array)$__mlePendingCardRaw;
-    if (empty($__mlePendingScopeCard['game_id']) && !empty($__mlePendingFullByLotteryId[$__mlePendingLid]['game_id'])) {
-        $__mlePendingScopeCard['game_id'] = (string)$__mlePendingFullByLotteryId[$__mlePendingLid]['game_id'];
+    if (empty($__mlePendingScopeCard['game_id']) && !empty($__mleStrictPendingFullByLotteryId[$__mlePendingLid]['game_id'])) {
+        $__mlePendingScopeCard['game_id'] = (string)$__mleStrictPendingFullByLotteryId[$__mlePendingLid]['game_id'];
     }
     $____mlePendingScope = mylottoexpertResolveUpcomingDrawScope($__mlePendingScopeCard);
-    if (trim((string)($____mlePendingScope['date'] ?? '')) === '' && !empty($__mlePendingFullByLotteryId[$__mlePendingLid])) {
-        $____mlePendingScope = mylottoexpertResolveUpcomingDrawScope((array)$__mlePendingFullByLotteryId[$__mlePendingLid]);
+    if (trim((string)($____mlePendingScope['date'] ?? '')) === '' && !empty($__mleStrictPendingFullByLotteryId[$__mlePendingLid])) {
+        $____mlePendingScope = mylottoexpertResolveUpcomingDrawScope((array)$__mleStrictPendingFullByLotteryId[$__mlePendingLid]);
     }
     $__mlePendingDate = trim((string)($____mlePendingScope['date'] ?? ''));
     if ($__mlePendingDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mlePendingDate)) {
-        /* [[MLE_V5_SELECTOR_PENDING_FALLBACK_2026_06_01]]
-           No upcoming draw date could be resolved for this selector card (all
-           pending rows have NULL draw dates). Fall back to the prediction_summary
-           pending_runs count that was correctly computed in
-           mleAdvisorySummarizeActiveLotteryBucket() from raw bucket row counts.
-           This fallback only sets the top-card pending display; it never feeds the
-           DB pending query, so stale NULL-date rows cannot be re-introduced. */
-        $__mlePendingSummaryFallback = (array)($__mlePendingCardRaw['prediction_summary'] ?? array());
-        $__mlePendingFallbackCount = max(0, (int)($__mlePendingSummaryFallback['pending_runs'] ?? 0));
-        if ($__mlePendingFallbackCount > 0 && !isset($__mlePendingByLotteryId[$__mlePendingLid])) {
-            $__mlePendingByLotteryId[$__mlePendingLid] = $__mlePendingFallbackCount;
-        }
+        /* No valid upcoming draw date resolved: strict pending is 0.
+           Do not fall back to prediction_summary.pending_runs from the selector
+           card because that value is produced by mleAdvisorySummarizeActive-
+           LotteryBucket() without a saved-run identity requirement and can
+           produce false 1-pending counts. */
+        $__mleStrictPendingByLotteryId[$__mlePendingLid] = 0;
         continue;
     }
     $__mlePendingDrawAt = trim((string)($____mlePendingScope['draw_at'] ?? ''));
@@ -29299,17 +29333,17 @@ foreach ((array)$__mleBriefSourceCards as $__mlePendingCardRaw) {
         $__mlePendingScopeCard['next_draw_at'] = $__mlePendingDrawAt;
         $__mlePendingScopeCard['target_draw_at'] = $__mlePendingDrawAt;
     }
-    $__mlePendingCount = null;
+    $__mlePendingCount = 0;
     if (is_object($db) && (int)$workspaceUserId > 0) {
-        $__mlePendingCount = mylottoexpertDatabasePendingRunCount($db, $workspaceUserId, $__mlePendingScopeCard);
+        $__mlePendingDbResult = mylottoexpertDatabasePendingRunCount($db, $workspaceUserId, $__mlePendingScopeCard, true);
+        if ($__mlePendingDbResult !== null) {
+            $__mlePendingCount = (int)$__mlePendingDbResult;
+        }
     }
-    if ($__mlePendingCount === null) {
-        $__mlePendingCount = mylottoexpertCanonicalPendingRunCount($__mlePendingScopeCard);
-    }
-    $__mlePendingByLotteryId[$__mlePendingLid] = max(0, (int)$__mlePendingCount);
-    $__mlePendingScopeByLotteryId[$__mlePendingLid] = array('date'=>$__mlePendingDate, 'draw_at'=>$__mlePendingDrawAt);
+    $__mleStrictPendingByLotteryId[$__mlePendingLid] = max(0, $__mlePendingCount);
+    $__mleStrictPendingScopeByLotteryId[$__mlePendingLid] = array('date'=>$__mlePendingDate, 'draw_at'=>$__mlePendingDrawAt);
 }
-unset($__mlePendingFullCardRaw, $__mlePendingFullLid, $__mlePendingCardRaw, $__mlePendingLid, $__mlePendingScopeCard, $____mlePendingScope, $__mlePendingDate, $__mlePendingDrawAt, $__mlePendingCount, $__mlePendingSummaryFallback, $__mlePendingFallbackCount);
+unset($__mlePendingFullCardRaw, $__mlePendingFullLid, $__mlePendingCardRaw, $__mlePendingLid, $__mlePendingScopeCard, $____mlePendingScope, $__mlePendingDate, $__mlePendingDrawAt, $__mlePendingCount, $__mlePendingDbResult);
 foreach ((array)$__mleBriefSourceCards as $__briefCardRaw) {
     $__briefLid = (int)($__briefCardRaw['lottery_id'] ?? 0);
     if ($__briefLid <= 0) { continue; }
@@ -29328,8 +29362,11 @@ foreach ((array)$__mleBriefSourceCards as $__briefCardRaw) {
     $__briefMethodLabel = mleAdvisoryMethodLabel($__briefMethodKey);
     $__briefMethodRole = mleAdvisoryMethodRoleLabel($__briefMethodKey);
     $__briefMethodTrack = mleAdvisoryMethodTrackLabel($__briefMethodKey);
-    if (isset($__mlePendingByLotteryId[$__briefLid])) {
-        $__briefPending = max(0, (int)$__mlePendingByLotteryId[$__briefLid]);
+    if (isset($__mleStrictPendingByLotteryId[$__briefLid])) {
+        /* [[MLE_V5_STRICT_PENDING_ASSIGN_2026_06_01]]
+           Use the strict DB-only count from $__mleStrictPendingByLotteryId.
+           selector prediction_summary.pending_runs is NOT used here. */
+        $__briefPending = max(0, (int)$__mleStrictPendingByLotteryId[$__briefLid]);
         if (!isset($__briefCardRaw['prediction_summary']) || !is_array($__briefCardRaw['prediction_summary'])) {
             $__briefCardRaw['prediction_summary'] = array();
         }
@@ -29340,22 +29377,10 @@ foreach ((array)$__mleBriefSourceCards as $__briefCardRaw) {
         $__briefCardRaw['precision_progress']['pending_runs'] = $__briefPending;
         $__briefCardRaw['mle_canonical_pending_runs'] = $__briefPending;
     } else {
-        /* [[MLE_V5_BRIEF_SYNC_RESCUE_2026_06_01]]
-           Capture the selector card's existing pending count before sync.
-           mylottoexpertSyncCardPendingCount() will overwrite
-           prediction_summary.pending_runs to 0 whenever no upcoming draw scope
-           can be resolved (e.g. all pending rows had NULL draw dates). If sync
-           zeroes out pending but the original selector summary had a non-zero
-           value and no draw scope was available, restore the original count so
-           the top-card detail text correctly reflects the pending state. */
-        $__briefSelectorPending = max(0, (int)(isset($__briefCardRaw['prediction_summary']['pending_runs']) ? $__briefCardRaw['prediction_summary']['pending_runs'] : 0));
-        $__briefSyncScope = mylottoexpertResolveUpcomingDrawScope((array)$__briefCardRaw);
-        $__briefSyncHasScope = (trim((string)($__briefSyncScope['date'] ?? '')) !== '');
+        /* Lottery was not included in the strict pending map build (unexpected).
+           Use 0 as a safe default. Do not fall back to selector pending_runs. */
+        $__briefPending = 0;
         $__briefCardRaw = mylottoexpertSyncCardPendingCount((array)$__briefCardRaw, $db, $workspaceUserId);
-        $__briefPending = mylottoexpertCanonicalPendingRunCount((array)$__briefCardRaw);
-        if ($__briefPending <= 0 && $__briefSelectorPending > 0 && !$__briefSyncHasScope) {
-            $__briefPending = $__briefSelectorPending;
-        }
     }
     $__briefSummary = (array)($__briefCardRaw['prediction_summary'] ?? array());
     $__briefVisual = (array)($__briefCardRaw['visual_runs'] ?? array('upcoming'=>array()));
@@ -29425,7 +29450,40 @@ $__mleBriefTotals['active'] = count($__mleBriefCards);
 if ($__mleBriefTotals['highest_stage_lottery'] === '' && !empty($__mleBriefCards)) {
     $__mleBriefTotals['highest_stage_lottery'] = $__mleBriefCleanLotteryName((string)($__mleBriefCards[0]['name'] ?? ''));
 }
-unset($__mleBriefSourceCards, $__briefCardRaw, $__briefLid, $__briefName, $__briefStats, $__briefSummary, $__briefVisual, $__briefProgress, $__briefBatch, $__briefSettings, $__briefTopMethod, $__briefMethodKey, $__briefMethodLabel, $__briefMethodRole, $__briefMethodTrack, $__briefPending, $__briefScored, $__briefDrawCycles, $__briefStageKey, $__briefStageLabel, $__briefStageRank, $__briefCleanName, $__briefType, $__briefLabel, $__briefDetail, $__briefPriority, $__briefActionTarget, $__briefActionPanel, $__briefActionCta, $__briefActionState, $__briefTargetKind, $__briefHasRecommendedAction, $__briefSelectorPending, $__briefSyncScope, $__briefSyncHasScope);
+/* [[MLE_V5_STRICT_PENDING_TOTAL_2026_06_01]]
+   Override $__mleBriefTotals['pending'] with the sum from the strict DB map so
+   the hero and momentum totals reflect only actual saved runs with identity,
+   not mixed selector-derived counts. */
+$__mleStrictPendingTotal = 0;
+foreach ($__mleStrictPendingByLotteryId as $__mleStrictPendingVal) { $__mleStrictPendingTotal += max(0, (int)$__mleStrictPendingVal); }
+$__mleBriefTotals['pending'] = $__mleStrictPendingTotal;
+unset($__mleStrictPendingVal, $__mleStrictPendingTotal);
+/* [[MLE_V5_STRICT_PENDING_DEBUG_2026_06_01]] Admin-only diagnostics (hidden). */
+if (!$user->guest && $user->authorise('core.admin')) {
+    $__mleStrictPendingDebug = array();
+    foreach ($__mleStrictPendingByLotteryId as $__mleStrictDbgLid => $__mleStrictDbgCount) {
+        $__mleStrictDbgScope = $__mleStrictPendingScopeByLotteryId[(int)$__mleStrictDbgLid] ?? array();
+        $__mleStrictPendingDebug[] = array(
+            'lottery_id'           => (int)$__mleStrictDbgLid,
+            'upcoming_draw_date'   => (string)($__mleStrictDbgScope['date'] ?? ''),
+            'strict_pending_count' => (int)$__mleStrictDbgCount,
+        );
+    }
+    foreach ($__mleBriefCards as $__mleStrictDbgCard) {
+        $__mleStrictDbgLid = (int)($__mleStrictDbgCard['lottery_id'] ?? 0);
+        foreach ($__mleStrictPendingDebug as &$__mleStrictDbgRow) {
+            if ((int)$__mleStrictDbgRow['lottery_id'] === $__mleStrictDbgLid) {
+                $__mleStrictDbgRow['top_card_pending_displayed'] = (int)($__mleStrictDbgCard['pending'] ?? 0);
+                break;
+            }
+        }
+        unset($__mleStrictDbgRow);
+    }
+    echo '<!-- mle-strict-pending-debug:' . json_encode($__mleStrictPendingDebug) . ':end -->';
+    unset($__mleStrictPendingDebug, $__mleStrictDbgLid, $__mleStrictDbgCount, $__mleStrictDbgScope, $__mleStrictDbgCard);
+}
+unset($__mleBriefSourceCards, $__briefCardRaw, $__briefLid, $__briefName, $__briefStats, $__briefSummary, $__briefVisual, $__briefProgress, $__briefBatch, $__briefSettings, $__briefTopMethod, $__briefMethodKey, $__briefMethodLabel, $__briefMethodRole, $__briefMethodTrack, $__briefPending, $__briefScored, $__briefDrawCycles, $__briefStageKey, $__briefStageLabel, $__briefStageRank, $__briefCleanName, $__briefType, $__briefLabel, $__briefDetail, $__briefPriority, $__briefActionTarget, $__briefActionPanel, $__briefActionCta, $__briefActionState, $__briefTargetKind, $__briefHasRecommendedAction);
+unset($__mleStrictPendingByLotteryId, $__mleStrictPendingScopeByLotteryId, $__mleStrictPendingFullByLotteryId);
 usort($__mleBriefCards, static function($a, $b) { return ((int)($b['priority'] ?? 0)) <=> ((int)($a['priority'] ?? 0)); });
 
 $__mleBriefTopCards = $__mleBriefCards;
