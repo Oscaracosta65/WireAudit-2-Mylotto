@@ -27296,6 +27296,10 @@ if ($__mleAction === 'run_skai_precision_lock_batch') {
             'target_extra_count' => ($target['target_extra_count'] ?? null),
             'save_intent' => 'prediction_archive',
             'origin_source' => 'mle_precision_lock_batch',
+            'play_status' => 'draft',
+            'evaluation_status' => 'pending',
+            'hive_contract_status' => 'hive_ready',
+            'hive_intake_mode' => 'observed_skai_batch',
             'source_batch_id' => (int)$batchId,
             'source_batch_run_id' => (int)$runId,
             'source_batch_type' => (string)($header['batch_type'] ?? 'Precision Focus Batch'),
@@ -28583,6 +28587,11 @@ if ($__savePredictionAsPlay > 0) {
                 $__playInsert['wheel_exported_at'] = null;
                 $__playInsert['is_favorite_play'] = 0;
                 $__playInsert['play_notes'] = null;
+                $__playInsert['source_batch_id'] = null;
+                $__playInsert['source_batch_run_id'] = null;
+                $__playInsert['source_batch_run_order'] = null;
+                $__playInsert['hive_contract_status'] = null;
+                $__playInsert['hive_intake_mode'] = null;
 
                 $__cols = array();
                 $__vals = array();

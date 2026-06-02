@@ -17172,6 +17172,8 @@ $row = (object) [
     // on sites where save_intent exists and is used to separate prediction archives
     // from manual play sets.
     'save_intent'         => 'prediction_archive',
+    'play_status'         => 'draft',
+    'evaluation_status'   => 'pending',
     'label'               => (string) $label,
     'prediction_target_id' => ($predictionTargetId !== '' ? $predictionTargetId : null),
     'prediction_target_key' => ($predictionTargetKey !== '' ? $predictionTargetKey : null),
