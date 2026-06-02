@@ -20960,12 +20960,15 @@ function mleAdvisoryResolveSkaiBatchOpenUrl($db, $lotteryId, $batchId, $batchTyp
 {
     $lotteryId = (int)$lotteryId;
     $batchId = (int)$batchId;
+    $batchType = trim((string)$batchType);
+    $isRegularBatch = ($batchType !== '' && stripos($batchType, 'regular') !== false);
+    $requiredAction = $isRegularBatch ? 'regular_9_batch' : 'precision_batch';
+    $openAction = $isRegularBatch ? 'regular_9_batch' : 'precision_batch';
     $extraArgs = array(
         'mle_skai_batch' => 1,
         'mle_skai_bridge' => 1,
-        'mle_precision_batch' => 1,
         'mle_guided_mode' => 'required',
-        'mle_required_action' => 'precision_batch',
+        'mle_required_action' => $requiredAction,
         'mle_cancel_allowed' => 1,
         'mle_command_source' => 'mylottoexpert',
         'mle_batch_enforcement' => 'guided_locked',
@@ -20973,10 +20976,12 @@ function mleAdvisoryResolveSkaiBatchOpenUrl($db, $lotteryId, $batchId, $batchTyp
         'mle_batch_scope' => 'exact_lottery',
         'batch_id' => $batchId,
         'lottery_id' => $lotteryId,
-        'open' => 'precision_batch',
+        'open' => $openAction,
         'source' => 'mylottoexpert',
     );
-    $batchType = trim((string)$batchType);
+    if (!$isRegularBatch) {
+        $extraArgs['mle_precision_batch'] = 1;
+    }
     if ($batchType !== '') {
         $extraArgs['mle_batch_type'] = strtolower(preg_replace('/[^a-z0-9]+/i', '_', $batchType));
     }
@@ -26576,6 +26581,7 @@ if ($__mleAction === 'create_skai_batch') {
             $__batchTargetDrawDate = (string)($__batchDrawTarget['target_draw_date'] ?? '');
         }
 
+        $__batchInsertedRunCount = 0;
         foreach ($__batchRunLabels as $__batchRunIdx => $__batchRunLabel) {
             $__batchRunOrder = $__batchRunIdx + 1;
             $__batchIsControl = ($__batchRunOrder === 1) ? 1 : 0;
@@ -26678,17 +26684,25 @@ if ($__mleAction === 'create_skai_batch') {
                 . ')'
             );
             $db->execute();
+            $__batchInsertedRunCount++;
         }
-        unset($__batchRunIdx, $__batchRunLabel, $__batchRunOrder, $__batchIsControl, $__batchRunSettings, $__batchRunTestValue, $__batchRunSettingsJson, $__batchRunPhase);
+        if ($__batchInsertedRunCount !== 9) {
+            throw new \RuntimeException('Batch run rows were not saved as exactly nine.');
+        }
+        unset($__batchRunIdx, $__batchRunLabel, $__batchRunOrder, $__batchIsControl, $__batchRunSettings, $__batchRunTestValue, $__batchRunSettingsJson, $__batchRunPhase, $__batchInsertedRunCount);
         $__batchOpenSkaiUrl = mleAdvisoryResolveSkaiBatchOpenUrl($db, $__batchLotteryId, $__batchHeaderId, $__batchTypeLabel);
         if (trim((string)$__batchOpenSkaiUrl) === '') {
-            $__batchOpenSkaiUrl = mleAdvisoryBuildCanonicalSkaiLotteryUrl($db, $__batchLotteryId, array(
+            $__batchIsRegularOpen = ($__batchRequestedPlan === 'regular_9_batch');
+            $__batchRequiredAction = $__batchIsRegularOpen ? 'regular_9_batch' : 'precision_batch';
+            $__batchOpenAction = $__batchIsRegularOpen ? 'regular_9_batch' : 'precision_batch';
+            $__batchOpenArgs = array(
                 'mle_skai_batch' => 1,
                 'mle_skai_bridge' => 1,
-                'mle_precision_batch' => 1,
+                'mle_global_batch' => 1,
+                'mle_batch_scope' => 'exact_lottery',
                 'batch_id' => (int)$__batchHeaderId,
                 'lottery_id' => (int)$__batchLotteryId,
-                'open' => 'precision_batch',
+                'open' => $__batchOpenAction,
                 'source' => 'mylottoexpert',
                 'mle_batch_type' => strtolower(preg_replace('/[^a-z0-9]+/i', '_', (string)$__batchTypeLabel)),
                 'mle_research_queue_id' => (int)$__batchResearchQueueId,
@@ -26698,9 +26712,12 @@ if ($__mleAction === 'create_skai_batch') {
                 'mle_assignment_policy' => (string)($__batchPlan['_mle_v101_assignment_policy'] ?? 'single_user_unique_first_assignment'),
                 'mle_refinement_round' => (int)($__batchPlan['_mle_v101_refinement_round'] ?? 0),
                 'mle_guided_mode' => 'required',
-                'mle_required_action' => 'research_batch',
+                'mle_required_action' => $__batchRequiredAction,
                 'mle_command_source' => 'mylottoexpert'
-            ));
+            );
+            if (!$__batchIsRegularOpen) { $__batchOpenArgs['mle_precision_batch'] = 1; }
+            $__batchOpenSkaiUrl = mleAdvisoryBuildCanonicalSkaiLotteryUrl($db, $__batchLotteryId, $__batchOpenArgs);
+            unset($__batchIsRegularOpen, $__batchRequiredAction, $__batchOpenAction, $__batchOpenArgs);
         }
 
         try {
@@ -26730,6 +26747,18 @@ if ($__mleAction === 'create_skai_batch') {
                 ),
             ));
         } catch (\Throwable $e) {   }
+        try {
+            $__mleHiddenForBatch = mylottoexpertGetHiddenLotteryIds($db, $workspaceUserId);
+            $__mleHiddenForBatchMap = array();
+            foreach ((array)$__mleHiddenForBatch as $__mleHiddenRow) {
+                $__mleHiddenRowId = (int)$__mleHiddenRow;
+                if ($__mleHiddenRowId > 0 && $__mleHiddenRowId !== (int)$__batchLotteryId) {
+                    $__mleHiddenForBatchMap[$__mleHiddenRowId] = $__mleHiddenRowId;
+                }
+            }
+            mylottoexpertSetHiddenLotteryIds($db, $workspaceUserId, array_values($__mleHiddenForBatchMap));
+            unset($__mleHiddenForBatch, $__mleHiddenForBatchMap, $__mleHiddenRow, $__mleHiddenRowId);
+        } catch (\Throwable $__mleHiddenRefreshEx) {   }
         error_log('[MLE SKAI TRACE] response_sent action=create_skai_batch user_id=' . (int)$workspaceUserId . ' lottery_id=' . (int)$__batchLotteryId . ' batch_id=' . (int)$__batchHeaderId . ' queue_id=' . (int)$__batchResearchQueueId . ' assignment_id=' . (int)$__batchResearchAssignmentId . ' skai_url=' . (string)$__batchOpenSkaiUrl);
         $app->enqueueMessage($__batchTypeLabel . ' created. LottoExpert is opening the correct SKAI lottery page now. Research mode: ' . str_replace('_', ' ', (string)$__batchV97ResearchMode) . '.', 'message');
         $app->redirect($__batchOpenSkaiUrl);
@@ -32457,7 +32486,7 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
                     style="display:none;margin:0;">
                 <input type="hidden" name="mle_action" value="create_skai_batch">
                 <input type="hidden" name="mle_batch_plan" value="<?php echo htmlspecialchars($__v38InlineBatchPlan, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="mle_batch_phase" value="<?php echo htmlspecialchars($__v38InlineBatchPlan, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="mle_batch_phase" value="<?php echo $__v38InlineBatchPlan === 'regular_9_batch' ? 'regular' : htmlspecialchars($__v38InlineBatchPlan, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="lottery_id" value="<?php echo (int)$__advLid; ?>">
                 <input type="hidden" name="game_id" value="<?php echo htmlspecialchars((string)$__advSkaiGameIdAttr, ENT_QUOTES, 'UTF-8'); ?>">
                 <?php if (trim((string)$__advNextDrawRaw) !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim((string)$__advNextDrawRaw))): ?>
@@ -32475,7 +32504,7 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
                     style="display:none;margin:0;">
                 <input type="hidden" name="mle_action" value="create_skai_batch">
                 <input type="hidden" name="mle_batch_plan" value="regular_9_batch">
-                <input type="hidden" name="mle_batch_phase" value="regular_9_batch">
+                <input type="hidden" name="mle_batch_phase" value="regular">
                 <input type="hidden" name="lottery_id" value="<?php echo (int)$__advLid; ?>">
                 <input type="hidden" name="game_id" value="<?php echo htmlspecialchars((string)$__advSkaiGameIdAttr, ENT_QUOTES, 'UTF-8'); ?>">
                 <?php if (trim((string)$__advNextDrawRaw) !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim((string)$__advNextDrawRaw))): ?>
@@ -33559,7 +33588,7 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
                 style="display:none;margin:0;">
             <input type="hidden" name="mle_action" value="create_skai_batch">
             <input type="hidden" name="mle_batch_plan" value="<?php echo htmlspecialchars($__simpleStepBatchPlan, ENT_QUOTES, 'UTF-8'); ?>">
-            <input type="hidden" name="mle_batch_phase" value="<?php echo htmlspecialchars($__simpleStepBatchPlan, ENT_QUOTES, 'UTF-8'); ?>">
+            <input type="hidden" name="mle_batch_phase" value="<?php echo $__simpleStepBatchPlan === 'regular_9_batch' ? 'regular' : htmlspecialchars($__simpleStepBatchPlan, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="lottery_id" value="<?php echo (int)$__advLid; ?>">
             <input type="hidden" name="game_id" value="<?php echo htmlspecialchars((string)$__advSkaiGameIdAttr, ENT_QUOTES, 'UTF-8'); ?>">
             <?php if (trim((string)$__advNextDrawRaw) !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim((string)$__advNextDrawRaw))): ?>
@@ -34319,10 +34348,10 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
           <div class="mle-skai-batch-test__line"><strong>Current evidence:</strong> <?php echo $__advBatchEvidence; ?></div>
           <?php if ($__advTopMKey === 'skai'): ?>
           <div class="mle-skai-batch-test__line"><strong>Beginner step:</strong> Run regular SKAI prediction batches first. Aim for about 5 completed regular batch cycles before expecting a Precision Focus batch recommendation.</div>
-          <form method="post" class="mle-regular-batch-action-form" target="_blank" style="margin-top:10px">
+          <form method="post" class="mle-regular-batch-action-form mle-v38-batch-action-form" target="_blank" style="margin-top:10px" data-mle-v38-batch-action-form="regular">
             <input type="hidden" name="mle_action" value="create_skai_batch">
             <input type="hidden" name="mle_batch_plan" value="regular_9_batch">
-            <input type="hidden" name="mle_batch_phase" value="regular_9_batch">
+            <input type="hidden" name="mle_batch_phase" value="regular">
             <input type="hidden" name="lottery_id" value="<?php echo (int)$__advLid; ?>">
             <input type="hidden" name="game_id" value="<?php echo htmlspecialchars((string)$__advSkaiGameIdAttr, ENT_QUOTES, 'UTF-8'); ?>">
             <?php if (trim((string)$__advNextDrawRaw) !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim((string)$__advNextDrawRaw))): ?>
@@ -46538,7 +46567,7 @@ The server-rendered phase state is now the source of truth.
                     else { f.submit(); }
                     return;
                 }
-                if (window.alert) { window.alert('The 9-run batch form is missing. Please refresh and try again.'); }
+                if (window.alert) { window.alert('The tracked 9-run batch form is missing. Please refresh and try again.'); }
             }, false);
         }
     }

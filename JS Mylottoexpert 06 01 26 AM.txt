@@ -306,7 +306,7 @@
       if (ev.stopImmediatePropagation) { ev.stopImmediatePropagation(); }
       restoreHandoffButton(el);
       clearSkaiHandoffLoading();
-      if (window.alert) { window.alert('The 9-run batch form is missing. Please refresh and try again.'); }
+      if (window.alert) { window.alert('The tracked 9-run batch form is missing. Please refresh and try again.'); }
       return;
     } else if (action === 'open-skai') {
       url = el.getAttribute('data-skai-regular-url') || el.getAttribute('data-skai-url') || el.getAttribute('href') || '';
@@ -7213,6 +7213,16 @@ function mleAdvisoryCardPrint(btn) {
       f = qs('.mle-next-settings-run__form', card);
     }
 
+    if (mode === 'regular_skai_batch' || mode === 'regular_skai') {
+      f = qs('form.mle-regular-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', card);
+      if (!f) {
+        actionInput = qs('form input[name="mle_action"][value="create_skai_batch"]', card);
+        if (actionInput && actionInput.form && qs('input[name="mle_batch_plan"][value="regular_9_batch"], input[name="mle_batch_plan"][value="regular"], input[name="mle_batch_plan"][value="regular_skai_batch"]', actionInput.form)) {
+          f = actionInput.form;
+        }
+      }
+    }
+
     if (!f && target) {
       actionInput = qs('form input[name="mle_action"][value="create_skai_batch"]', target);
       f = actionInput ? closest(actionInput, 'form') : null;
@@ -7236,6 +7246,10 @@ function mleAdvisoryCardPrint(btn) {
     }
     if (mode === 'horizon_batch') {
       ensureHiddenInput(f, 'mle_batch_plan', 'horizon');
+    }
+    if (mode === 'regular_skai_batch' || mode === 'regular_skai') {
+      ensureHiddenInput(f, 'mle_batch_plan', 'regular_9_batch');
+      ensureHiddenInput(f, 'mle_batch_phase', 'regular');
     }
 
     f.setAttribute('data-mle-v121-action-submit', '1');
@@ -7331,12 +7345,9 @@ function mleAdvisoryCardPrint(btn) {
       if (submitActionBatchForm(card, btn, mode)) { return true; }
     }
     if (state === 'action' && (mode === 'regular_skai_batch' || mode === 'regular_skai')) {
-      var regularUrl = skaiUrl(card, btn);
-      if (regularUrl) {
-        if (!confirmRegularSkaiBatchOpen()) { return true; }
-        openSkaiInNewWindow(regularUrl);
-        return true;
-      }
+      if (submitActionBatchForm(card, btn, mode)) { return true; }
+      if (window.alert) { window.alert('The tracked 9-run batch form is missing. Please refresh and try again.'); }
+      return true;
     }
     if (state === 'pending') {
       flash(target || pendingTarget(card));
