@@ -1834,6 +1834,11 @@ function mylottoexpertEnsureUserSavedNumbersPlayColumns($db)
         'target_draw_at'                 => "ALTER TABLE `{$rawName}` ADD COLUMN `target_draw_at` DATETIME DEFAULT NULL",
         'target_draw_session'            => "ALTER TABLE `{$rawName}` ADD COLUMN `target_draw_session` VARCHAR(40) NOT NULL DEFAULT ''",
         'target_timezone_id'             => "ALTER TABLE `{$rawName}` ADD COLUMN `target_timezone_id` VARCHAR(64) NOT NULL DEFAULT ''",
+        // [[MLE_DRAW_TZ_FIX_2026]] Additive traceability columns for official draw timezone resolution
+        'target_draw_timezone'           => "ALTER TABLE `{$rawName}` ADD COLUMN `target_draw_timezone` VARCHAR(64) NOT NULL DEFAULT ''",
+        'target_draw_label'              => "ALTER TABLE `{$rawName}` ADD COLUMN `target_draw_label` VARCHAR(191) NOT NULL DEFAULT ''",
+        'target_draw_source'             => "ALTER TABLE `{$rawName}` ADD COLUMN `target_draw_source` VARCHAR(80) NOT NULL DEFAULT ''",
+        'target_draw_resolution_note'    => "ALTER TABLE `{$rawName}` ADD COLUMN `target_draw_resolution_note` TEXT NULL DEFAULT NULL",
         'target_prediction_family'       => "ALTER TABLE `{$rawName}` ADD COLUMN `target_prediction_family` VARCHAR(30) NOT NULL DEFAULT ''",
         'target_prediction_type'         => "ALTER TABLE `{$rawName}` ADD COLUMN `target_prediction_type` VARCHAR(50) NOT NULL DEFAULT ''",
         'target_pick_size'               => "ALTER TABLE `{$rawName}` ADD COLUMN `target_pick_size` INT(11) DEFAULT NULL",
@@ -26605,6 +26610,8 @@ if ($__mleAction === 'create_skai_batch') {
             $__batchRunSettings['target_draw_label']           = (string)($__batchDrawTarget['target_draw_label']           ?? $__batchTargetDrawDate);
             $__batchRunSettings['target_draw_source']          = (string)($__batchDrawTarget['target_draw_source']          ?? 'lottery_timezone_resolver');
             $__batchRunSettings['target_draw_resolution_note'] = (string)($__batchDrawTarget['target_draw_resolution_note'] ?? '');
+            // [[MLE_DRAW_TZ_FIX_2026]] target_draw_at is stored as UTC via toSql(); label it explicitly
+            $__batchRunSettings['target_draw_at_tz']           = 'UTC';
             $__batchRunSettings['source'] = 'mylottoexpert';
             $__batchRunSettings['batch_plan'] = (string)$__batchRequestedPlan;
             $__batchRunSettings['mle_required_action'] = (string)$__batchRequestedPlan;
@@ -27150,6 +27157,11 @@ if ($__mleAction === 'run_skai_precision_lock_batch') {
             'target_draw_at' => ($target['target_draw_at'] ?? null),
             'target_draw_session' => ($target['target_draw_session'] ?? null),
             'target_timezone_id' => ($target['target_timezone_id'] ?? null),
+            // [[MLE_DRAW_TZ_FIX_2026]] Persist draw timezone traceability fields from resolver
+            'target_draw_timezone'        => ($__batchSaveDrawTarget['target_draw_timezone'] ?? null),
+            'target_draw_label'           => ($__batchSaveDrawTarget['target_draw_label'] ?? null),
+            'target_draw_source'          => ($__batchSaveDrawTarget['target_draw_source'] ?? null),
+            'target_draw_resolution_note' => ($__batchSaveDrawTarget['target_draw_resolution_note'] ?? null),
             'target_prediction_family' => ($target['target_prediction_family'] ?? null),
             'target_prediction_type' => ($target['target_prediction_type'] ?? null),
             'target_pick_size' => ($target['target_pick_size'] ?? null),
