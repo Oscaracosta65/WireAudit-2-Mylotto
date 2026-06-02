@@ -16960,6 +16960,36 @@ $__skaiTargetDrawTimezoneRow = !empty($skaiBatchTargetDraw['target_draw_timezone
     ? (string)$skaiBatchTargetDraw['target_draw_timezone']
     : (isset($drawTz) ? $drawTz : ($predictionTarget['target_timezone_id'] ?? null));
 
+// [[SKAI_BATCH_TARGET_FINAL_OVERRIDE_2026_06_02]]
+// Final guard immediately before row mapping: if batch full_settings_json carries a valid
+// target_draw_date, force canonical persisted target_draw_* fields from that batch payload.
+$__skaiFinalTargetDrawDateRow = $__skaiTargetDrawDateRow;
+$__skaiFinalTargetDrawAtRow = $__skaiTargetDrawAtRow;
+$__skaiFinalTargetDrawTimezoneRow = $__skaiTargetDrawTimezoneRow;
+$__skaiFinalDrawLabel = $__skaiDrawLabel;
+$__skaiFinalDrawSource = $__skaiDrawSource;
+$__skaiFinalDrawResolutionNote = $__skaiDrawResolutionNote;
+$__skaiBatchFinalDate = trim((string)($skaiBatchTargetDraw['target_draw_date'] ?? ''));
+if ($__skaiBatchFinalDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $__skaiBatchFinalDate) && strtotime($__skaiBatchFinalDate) !== false) {
+    $__skaiFinalTargetDrawDateRow = $__skaiBatchFinalDate;
+    $__skaiFinalTargetDrawAtRow = !empty($skaiBatchTargetDraw['target_draw_at']) ? (string)$skaiBatchTargetDraw['target_draw_at'] : null;
+    if (!empty($skaiBatchTargetDraw['target_draw_timezone'])) {
+        $__skaiFinalTargetDrawTimezoneRow = (string)$skaiBatchTargetDraw['target_draw_timezone'];
+    }
+    if (!empty($skaiBatchTargetDraw['target_draw_label'])) {
+        $__skaiFinalDrawLabel = (string)$skaiBatchTargetDraw['target_draw_label'];
+    }
+    $__skaiFinalDrawSource = 'batch_json_preserved';
+    $__skaiBatchBaseResolutionNote = trim((string)($skaiBatchTargetDraw['target_draw_resolution_note'] ?? $__skaiFinalDrawResolutionNote));
+    if (strpos($__skaiBatchBaseResolutionNote, 'preserved_from_batch_full_settings_json') === false) {
+        $__skaiBatchBaseResolutionNote = $__skaiBatchBaseResolutionNote !== ''
+            ? ($__skaiBatchBaseResolutionNote . ' | preserved_from_batch_full_settings_json')
+            : 'preserved_from_batch_full_settings_json';
+    }
+    $__skaiFinalDrawResolutionNote = $__skaiBatchBaseResolutionNote;
+}
+unset($__skaiBatchFinalDate, $__skaiBatchBaseResolutionNote);
+
 $row = (object) [
     'user_id'             => (int) $user->id,
     'lottery_id'          => (int) $lotteryId,
@@ -16981,16 +17011,16 @@ $row = (object) [
     'prediction_target_json' => ($predictionTargetJson !== '' ? $predictionTargetJson : null),
     'target_game_id'      => ($predictionTarget['target_game_id'] ?? null),
     'target_lottery_id'   => ($predictionTarget['target_lottery_id'] ?? null),
-    'target_draw_date'    => $__skaiTargetDrawDateRow,
-    'target_draw_at'      => $__skaiTargetDrawAtRow,
+    'target_draw_date'    => $__skaiFinalTargetDrawDateRow,
+    'target_draw_at'      => $__skaiFinalTargetDrawAtRow,
     'target_draw_session' => ($predictionTarget['target_draw_session'] ?? null),
     'target_timezone_id'  => ($predictionTarget['target_timezone_id'] ?? null),
     // [[MLE_DRAW_TZ_FIX_2026]] Traceability fields - written to row when columns exist
-    'target_draw_timezone'        => $__skaiTargetDrawTimezoneRow,
+    'target_draw_timezone'        => $__skaiFinalTargetDrawTimezoneRow,
     'target_draw_at_tz'           => !empty($skaiBatchTargetDraw['target_draw_at_tz']) ? (string)$skaiBatchTargetDraw['target_draw_at_tz'] : null,
-    'target_draw_label'           => ($__skaiDrawLabel !== '' ? $__skaiDrawLabel : null),
-    'target_draw_source'          => ($__skaiDrawSource !== '' ? $__skaiDrawSource : null),
-    'target_draw_resolution_note' => ($__skaiDrawResolutionNote !== '' ? $__skaiDrawResolutionNote : null),
+    'target_draw_label'           => ($__skaiFinalDrawLabel !== '' ? $__skaiFinalDrawLabel : null),
+    'target_draw_source'          => ($__skaiFinalDrawSource !== '' ? $__skaiFinalDrawSource : null),
+    'target_draw_resolution_note' => ($__skaiFinalDrawResolutionNote !== '' ? $__skaiFinalDrawResolutionNote : null),
     'target_prediction_family' => ($predictionTarget['target_prediction_family'] ?? null),
     'target_prediction_type' => ($predictionTarget['target_prediction_type'] ?? null),
     'target_pick_size'    => ($predictionTarget['target_pick_size'] ?? null),
