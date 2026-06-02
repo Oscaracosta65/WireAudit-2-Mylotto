@@ -207,53 +207,93 @@ window.__MLE_CORE_JS_BUILD = '20260601';
     finishExternalSkaiHandoff(button || form);
     return true;
   }
+  function normalizeLotteryId(raw){
+    return String(raw || '').replace(/[^0-9]/g, '');
+  }
+  function formLotteryId(form){
+    var row = form ? qs('input[name="lottery_id"]', form) : null;
+    return normalizeLotteryId(row ? row.value : '');
+  }
+  function buttonLotteryId(btn, card){
+    var outer;
+    var id = normalizeLotteryId((card && card.getAttribute && card.getAttribute('data-lottery-id')) || (btn && btn.getAttribute && btn.getAttribute('data-lottery-id')) || '');
+    if (id) { return id; }
+    outer = closest(btn, '.mle-lottery-outer');
+    return normalizeLotteryId((outer && outer.getAttribute && outer.getAttribute('data-outer-lottery-id')) || '');
+  }
+  function logBatchLotteryMismatch(clickedId, formId){
+    if (!clickedId || !formId || clickedId === formId) { return; }
+    if (window.console && typeof window.console.warn === 'function') {
+      window.console.warn('batch_form_lottery_mismatch clicked=' + clickedId + ' form=' + formId);
+    }
+  }
+  function isPlanMatch(form, kind){
+    var plan;
+    var phase;
+    var marker;
+    if (!form || !qs('input[name="mle_action"][value="create_skai_batch"]', form)) { return false; }
+    marker = String(form.getAttribute('data-mle-v38-batch-action-form') || '').toLowerCase();
+    plan = String((qs('input[name="mle_batch_plan"]', form) || {}).value || '').toLowerCase();
+    phase = String((qs('input[name="mle_batch_phase"]', form) || {}).value || '').toLowerCase();
+    if (kind === 'regular') {
+      return hasClass(form, 'mle-regular-batch-action-form') || marker === 'regular' || plan === 'regular_9_batch' || plan === 'regular' || plan === 'regular_skai_batch' || phase === 'regular';
+    }
+    if (kind === 'horizon') {
+      return hasClass(form, 'mle-history-window-action-form') || marker === 'horizon' || plan === 'horizon' || phase === 'horizon';
+    }
+    if (kind === 'settings') {
+      return hasClass(form, 'mle-next-settings-run__form') || hasClass(form, 'mle-skai-batch-test__form') || marker === 'settings' || plan === 'settings' || phase === 'settings';
+    }
+    return true;
+  }
+  function findMatchingBatchForm(root, selector, kind, lotteryId){
+    var forms;
+    var i;
+    var form;
+    var fid;
+    if (!root) { return null; }
+    forms = root.querySelectorAll(selector);
+    for (i = 0; i < forms.length; i++) {
+      form = forms[i];
+      if (!isPlanMatch(form, kind)) { continue; }
+      fid = formLotteryId(form);
+      if (lotteryId && fid && lotteryId !== fid) {
+        logBatchLotteryMismatch(lotteryId, fid);
+        continue;
+      }
+      return form;
+    }
+    return null;
+  }
   function findInlineBatchForm(btn){
     var journey;
     var plan;
     var card;
     var form;
-    var regularScope;
     var lotteryId;
-    var fallbackCard;
+    var regularScope;
     if (!btn) { return null; }
-    journey = closest(btn, '.mle-v38-user-journey');
-    if (journey) {
-      form = qs('form.mle-v38-batch-action-form', journey);
-      if (form) { return form; }
-    }
     card = closest(btn, '.mle-advisory-card');
+    lotteryId = buttonLotteryId(btn, card);
+    journey = closest(btn, '.mle-v38-user-journey');
     plan = String(btn.getAttribute('data-action-target') || '').toLowerCase();
-    if (card && (plan === 'history_window_check' || plan === 'horizon_batch' || plan === 'horizon_ready_batch')) {
-      form = qs('form.mle-history-window-action-form, form.mle-v38-batch-action-form[data-mle-v38-batch-action-form="horizon"]', card);
+    if (plan === 'history_window_check' || plan === 'horizon_batch' || plan === 'horizon_ready_batch') {
+      form = findMatchingBatchForm(journey, 'form.mle-history-window-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="horizon"]', 'horizon', lotteryId) || findMatchingBatchForm(card, 'form.mle-history-window-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="horizon"]', 'horizon', lotteryId);
       if (form) { return form; }
     }
-    if (card && (plan === 'prediction_9_batch' || plan === 'settings_batch' || plan === 'settings_ready_batch' || plan === 'next_settings' || plan === 'precision_batch')) {
-      form = qs('form.mle-next-settings-run__form, form.mle-skai-batch-test__form, form.mle-v38-batch-action-form[data-mle-v38-batch-action-form="settings"]', card);
+    if (plan === 'prediction_9_batch' || plan === 'settings_batch' || plan === 'settings_ready_batch' || plan === 'next_settings' || plan === 'precision_batch') {
+      form = findMatchingBatchForm(journey, 'form.mle-next-settings-run__form, form.mle-skai-batch-test__form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="settings"]', 'settings', lotteryId) || findMatchingBatchForm(card, 'form.mle-next-settings-run__form, form.mle-skai-batch-test__form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="settings"]', 'settings', lotteryId);
       if (form) { return form; }
     }
     if (card && (plan === 'regular_skai_batch' || plan === 'regular_skai' || isRegularSkaiButton(btn))) {
-      form = qs('form.mle-regular-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', card);
+      form = findMatchingBatchForm(journey, 'form.mle-regular-batch-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', 'regular', lotteryId) || findMatchingBatchForm(card, 'form.mle-regular-batch-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', 'regular', lotteryId);
       if (form) { return form; }
       regularScope = qs('form input[name="mle_action"][value="create_skai_batch"]', card);
       if (regularScope && regularScope.form) {
         form = regularScope.form;
-        if (qs('input[name="mle_batch_plan"][value="regular_9_batch"], input[name="mle_batch_plan"][value="regular"], input[name="mle_batch_plan"][value="regular_skai_batch"]', form)) { return form; }
-      }
-      lotteryId = String(card.getAttribute('data-lottery-id') || btn.getAttribute('data-lottery-id') || '').replace(/[^0-9]/g, '');
-      if (!lotteryId) {
-        fallbackCard = closest(btn, '.mle-lottery-outer');
-        lotteryId = String((fallbackCard && fallbackCard.getAttribute('data-outer-lottery-id')) || '').replace(/[^0-9]/g, '');
-      }
-      if (lotteryId) {
-        fallbackCard = qs('.mle-advisory-card[data-lottery-id="' + lotteryId + '"], [data-mle-lottery-card][data-lottery-id="' + lotteryId + '"]', document);
-        if (fallbackCard) {
-          form = qs('form.mle-regular-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', fallbackCard);
-          if (form) { return form; }
-          regularScope = qs('form input[name="mle_action"][value="create_skai_batch"]', fallbackCard);
-          if (regularScope && regularScope.form) {
-            form = regularScope.form;
-            if (qs('input[name="mle_batch_plan"][value="regular_9_batch"], input[name="mle_batch_plan"][value="regular"], input[name="mle_batch_plan"][value="regular_skai_batch"]', form)) { return form; }
-          }
+        if (isPlanMatch(form, 'regular')) {
+          if (!lotteryId || !formLotteryId(form) || formLotteryId(form) === lotteryId) { return form; }
+          logBatchLotteryMismatch(lotteryId, formLotteryId(form));
         }
       }
     }

@@ -34425,11 +34425,12 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
             <p class="mle-history-window-action-note"><strong>Important:</strong> This is a window-narrowing search only. Do not use the numbers from this run as predictions. The purpose is to find the best draw-history range for future prediction runs.</p>
           </div>
           <?php if (!MLE_DEMO_MODE): ?>
-          <form method="post" class="mle-history-window-action-form" data-mle-confirm="horizon-create" target="_blank">
+          <form method="post" class="mle-history-window-action-form mle-v38-batch-action-form" data-mle-v38-batch-action-form="horizon" data-mle-confirm="horizon-create" target="_blank">
             <input type="hidden" name="mle_action" value="create_skai_batch">
             <input type="hidden" name="mle_batch_plan" value="horizon">
             <input type="hidden" name="mle_batch_phase" value="horizon">
             <input type="hidden" name="lottery_id" value="<?php echo (int)$__advLid; ?>">
+            <input type="hidden" name="game_id" value="<?php echo htmlspecialchars((string)$__advSkaiGameIdAttr, ENT_QUOTES, 'UTF-8'); ?>">
             <?php echo \Joomla\CMS\HTML\HTMLHelper::_('form.token'); ?>
             <button type="submit" class="mle-advisory-btn mle-advisory-btn--primary mle-history-window-action-button" data-nine-batch-submit="1">Create History Window Batch - Not a Prediction</button>
           </form>
@@ -34489,11 +34490,12 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
           <div class="mle-skai-batch-test__line"><strong>Guardrail:</strong> <?php echo $__advBatchGuardrail; ?></div>
           <div class="mle-skai-batch-test__line"><strong>Evidence used:</strong> <?php echo $__advBatchEvidence; ?></div>
           <?php if (!MLE_DEMO_MODE): ?>
-          <form method="post" class="mle-skai-batch-test__form" target="_blank" style="margin-top:12px" data-mle-confirm="<?php echo $__advIsHorizonBatch ? 'horizon-create' : 'precision-create'; ?>">
+          <form method="post" class="mle-skai-batch-test__form mle-v38-batch-action-form" target="_blank" style="margin-top:12px" data-mle-v38-batch-action-form="<?php echo $__advIsHorizonBatch ? 'horizon' : 'settings'; ?>" data-mle-confirm="<?php echo $__advIsHorizonBatch ? 'horizon-create' : 'precision-create'; ?>">
             <input type="hidden" name="mle_action" value="create_skai_batch">
             <input type="hidden" name="mle_batch_plan" value="<?php echo $__advIsHorizonBatch ? 'horizon' : 'settings'; ?>">
             <input type="hidden" name="mle_batch_phase" value="<?php echo $__advIsHorizonBatch ? 'horizon' : 'settings'; ?>">
             <input type="hidden" name="lottery_id" value="<?php echo (int)$__advLid; ?>">
+            <input type="hidden" name="game_id" value="<?php echo htmlspecialchars((string)$__advSkaiGameIdAttr, ENT_QUOTES, 'UTF-8'); ?>">
             <?php echo \Joomla\CMS\HTML\HTMLHelper::_('form.token'); ?>
             <button type="submit" class="mle-advisory-btn mle-advisory-btn--primary<?php echo $__advIsHorizonBatch ? ' mle-history-window-action-button' : ''; ?>" data-nine-batch-submit="1"><?php echo $__advIsHorizonBatch ? 'Create History Window Batch - Not a Prediction' : 'Create Settings Precision 9-Run Batch'; ?></button>
           </form>
@@ -34783,12 +34785,14 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
         <div class="mle-next-settings-run__wide"><span>When to use this instead of a batch</span><strong><?php echo $__advBatchHas ? 'This action now creates the 9-run SKAI batch directly, so you can run the complete bracketed test immediately.' : 'Best if you want one clean next test.'; ?></strong></div>
       </div>
       <?php if ($__advCanCreateNextSettingsNow): ?>
-      <form method="post" class="mle-next-settings-run__form" data-mle-confirm="precision-create" target="_blank">
+      <form method="post" class="mle-next-settings-run__form mle-v38-batch-action-form" data-mle-v38-batch-action-form="settings" data-mle-confirm="precision-create" target="_blank">
         <input type="hidden" name="mle_action" value="create_skai_batch">
         <input type="hidden" name="mle_batch_plan" value="settings">
+        <input type="hidden" name="mle_batch_phase" value="settings">
         <input type="hidden" name="mle_force_next_batch" value="1">
         <input type="hidden" name="base_saved_number_id" value="<?php echo (int)$__advBaseRunId; ?>">
         <input type="hidden" name="lottery_id" value="<?php echo (int)$__advLid; ?>">
+        <input type="hidden" name="game_id" value="<?php echo htmlspecialchars((string)$__advSkaiGameIdAttr, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="method" value="<?php echo htmlspecialchars($__advTopMKey, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="setting_key" value="<?php echo htmlspecialchars($__advSKey, ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="setting_label" value="<?php echo $__advSLabel; ?>">
@@ -46671,41 +46675,80 @@ The server-rendered phase state is now the source of truth.
 <script>
 (function () {
     'use strict';
+    function mleV128NormalizeLotteryId(v) {
+        return String(v || '').replace(/[^0-9]/g, '');
+    }
+    function mleV128FormLotteryId(form) {
+        var row = form ? form.querySelector('input[name="lottery_id"]') : null;
+        return mleV128NormalizeLotteryId(row ? row.value : '');
+    }
+    function mleV128ButtonLotteryId(btn, card) {
+        var holder;
+        var lid = mleV128NormalizeLotteryId((card && card.getAttribute('data-lottery-id')) || (btn && btn.getAttribute('data-lottery-id')) || '');
+        if (lid) { return lid; }
+        holder = btn && btn.closest ? btn.closest('.mle-lottery-outer') : null;
+        return mleV128NormalizeLotteryId((holder && holder.getAttribute('data-outer-lottery-id')) || '');
+    }
+    function mleV128LogLotteryMismatch(clickedId, formId) {
+        if (!clickedId || !formId || clickedId === formId) { return; }
+        if (window.console && typeof window.console.warn === 'function') {
+            window.console.warn('batch_form_lottery_mismatch clicked=' + clickedId + ' form=' + formId);
+        }
+    }
+    function mleV128FormMatchesPlan(form, mode) {
+        var marker;
+        var plan;
+        var phase;
+        if (!form || !form.querySelector('input[name="mle_action"][value="create_skai_batch"]')) { return false; }
+        marker = String(form.getAttribute('data-mle-v38-batch-action-form') || '').toLowerCase();
+        plan = String((form.querySelector('input[name="mle_batch_plan"]') || {}).value || '').toLowerCase();
+        phase = String((form.querySelector('input[name="mle_batch_phase"]') || {}).value || '').toLowerCase();
+        if (mode === 'regular') {
+            return form.classList.contains('mle-regular-batch-action-form') || marker === 'regular' || plan === 'regular_9_batch' || plan === 'regular' || plan === 'regular_skai_batch' || phase === 'regular';
+        }
+        if (mode === 'horizon') {
+            return form.classList.contains('mle-history-window-action-form') || marker === 'horizon' || plan === 'horizon' || phase === 'horizon';
+        }
+        if (mode === 'settings') {
+            return form.classList.contains('mle-next-settings-run__form') || form.classList.contains('mle-skai-batch-test__form') || marker === 'settings' || plan === 'settings' || phase === 'settings';
+        }
+        return true;
+    }
+    function mleV128PickForm(root, selector, mode, clickedLid) {
+        var nodes;
+        var i;
+        var form;
+        var fid;
+        if (!root) { return null; }
+        nodes = root.querySelectorAll(selector);
+        for (i = 0; i < nodes.length; i++) {
+            form = nodes[i];
+            if (!mleV128FormMatchesPlan(form, mode)) { continue; }
+            fid = mleV128FormLotteryId(form);
+            if (clickedLid && fid && clickedLid !== fid) {
+                mleV128LogLotteryMismatch(clickedLid, fid);
+                continue;
+            }
+            return form;
+        }
+        return null;
+    }
     function mleV128FindForm(btn) {
         var p = btn && btn.parentNode;
         var card;
-        var holder;
+        var mode;
         var lid;
-        var nodes;
-        var row;
-        if (!p) { return null; }
-        nodes = p.querySelectorAll('form.mle-v38-batch-action-form');
-        if (nodes && nodes.length > 0) { return nodes[0]; }
         card = btn && btn.closest ? btn.closest('.mle-advisory-card') : null;
         if (!card) { return null; }
-        nodes = card.querySelectorAll('form.mle-regular-batch-action-form, form[data-mle-v38-batch-action-form="regular"]');
-        if (nodes && nodes.length > 0) { return nodes[0]; }
-        row = card.querySelector('input[name="mle_action"][value="create_skai_batch"]');
-        if (row && row.form && row.form.querySelector('input[name="mle_batch_plan"][value="regular_9_batch"], input[name="mle_batch_plan"][value="regular"], input[name="mle_batch_plan"][value="regular_skai_batch"]')) {
-            return row.form;
+        lid = mleV128ButtonLotteryId(btn, card);
+        mode = String((btn && btn.getAttribute('data-action-target')) || '').toLowerCase();
+        if (mode === 'history_window_check' || mode === 'horizon_batch' || mode === 'horizon_ready_batch') {
+            return mleV128PickForm(p || card, 'form.mle-history-window-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="horizon"]', 'horizon', lid) || mleV128PickForm(card, 'form.mle-history-window-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="horizon"]', 'horizon', lid);
         }
-        lid = String((card && card.getAttribute('data-lottery-id')) || (btn && btn.getAttribute('data-lottery-id')) || '').replace(/[^0-9]/g, '');
-        if (!lid) {
-            holder = btn && btn.closest ? btn.closest('.mle-lottery-outer') : null;
-            lid = String((holder && holder.getAttribute('data-outer-lottery-id')) || '').replace(/[^0-9]/g, '');
+        if (mode === 'prediction_9_batch' || mode === 'settings_batch' || mode === 'settings_ready_batch' || mode === 'next_settings' || mode === 'precision_batch') {
+            return mleV128PickForm(p || card, 'form.mle-next-settings-run__form, form.mle-skai-batch-test__form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="settings"]', 'settings', lid) || mleV128PickForm(card, 'form.mle-next-settings-run__form, form.mle-skai-batch-test__form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="settings"]', 'settings', lid);
         }
-        if (lid) {
-            holder = document.querySelector('.mle-advisory-card[data-lottery-id="' + lid + '"], [data-mle-lottery-card][data-lottery-id="' + lid + '"]');
-            if (holder) {
-                nodes = holder.querySelectorAll('form.mle-regular-batch-action-form, form[data-mle-v38-batch-action-form="regular"]');
-                if (nodes && nodes.length > 0) { return nodes[0]; }
-                row = holder.querySelector('input[name="mle_action"][value="create_skai_batch"]');
-                if (row && row.form && row.form.querySelector('input[name="mle_batch_plan"][value="regular_9_batch"], input[name="mle_batch_plan"][value="regular"], input[name="mle_batch_plan"][value="regular_skai_batch"]')) {
-                    return row.form;
-                }
-            }
-        }
-        return null;
+        return mleV128PickForm(p || card, 'form.mle-regular-batch-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', 'regular', lid) || mleV128PickForm(card, 'form.mle-regular-batch-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', 'regular', lid);
     }
     function mleV128WireBtn(btn) {
         var at = btn.getAttribute('data-action-target') || '';
