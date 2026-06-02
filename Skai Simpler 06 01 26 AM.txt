@@ -16338,6 +16338,33 @@ $labelInput = implode(' - ', $parts);
             }
             unset($__gidU);
         }
+        // 1c. Safe state/game fallback mapping when timezone metadata is missing.
+        if (empty($lotteryTz)) {
+            $__gidState = strtoupper((string)($selectedGameId ?? ''));
+            $__lotNameState = strtoupper(trim((string)($lotteryConfig['lottery_name'] ?? $lotteryConfig['game_name'] ?? $lotteryConfig['name'] ?? '')));
+            $__stateCode = '';
+            if (preg_match('/^(CA|TX|FL|WA)[A-Z0-9_\-]*/', $__gidState, $__stateMatch)) {
+                $__stateCode = (string)$__stateMatch[1];
+            } elseif (strpos($__lotNameState, 'CALIFORNIA') !== false) {
+                $__stateCode = 'CA';
+            } elseif (strpos($__lotNameState, 'TEXAS') !== false) {
+                $__stateCode = 'TX';
+            } elseif (strpos($__lotNameState, 'FLORIDA') !== false) {
+                $__stateCode = 'FL';
+            } elseif (strpos($__lotNameState, 'WASHINGTON') !== false) {
+                $__stateCode = 'WA';
+            }
+            $__stateTzMap = array(
+                'CA' => 'America/Los_Angeles',
+                'TX' => 'America/Chicago',
+                'FL' => 'America/New_York',
+                'WA' => 'America/Los_Angeles',
+            );
+            if ($__stateCode !== '' && isset($__stateTzMap[$__stateCode])) {
+                $lotteryTz = (string)$__stateTzMap[$__stateCode];
+            }
+            unset($__stateTzMap, $__stateCode, $__gidState, $__lotNameState, $__stateMatch);
+        }
         // Validate lottery timezone
         if ($lotteryTz !== '') {
             try { new \DateTimeZone($lotteryTz); } catch (\Throwable $__) { $lotteryTz = ''; }
@@ -16406,6 +16433,16 @@ $labelInput = implode(' - ', $parts);
         $skaiSourceBatchRunId = (int)$in->getInt('source_batch_run_id', 0);
         $skaiSourceBatchIdForTarget = (int)$in->getInt('source_batch_id', 0);
         $skaiSourceBatchRunOrderForTarget = (int)$in->getInt('source_batch_run_order', 0);
+        $skaiPostedBatchIdForTarget = (int)$in->getInt('batch_id', 0);
+        $skaiPostedBatchIndexForTarget = (int)$in->getInt('batch_save_index', 0);
+        if ($skaiPostedBatchIndexForTarget <= 0) { $skaiPostedBatchIndexForTarget = (int)$in->getInt('batch_index', 0); }
+        $skaiPostedBatchContextForTarget = ((int)$in->getInt('mle_skai_batch', 0) === 1);
+        if ($skaiSourceBatchIdForTarget <= 0 && $skaiPostedBatchContextForTarget && $skaiPostedBatchIdForTarget > 0) {
+            $skaiSourceBatchIdForTarget = (int)$skaiPostedBatchIdForTarget;
+        }
+        if ($skaiSourceBatchRunOrderForTarget <= 0 && $skaiPostedBatchIndexForTarget > 0) {
+            $skaiSourceBatchRunOrderForTarget = (int)$skaiPostedBatchIndexForTarget;
+        }
         // [[SKAI_BATCH_TARGET_FIX_2026_06_02]] Canonical lookup is batch_id + run_order only.
         // source_batch_run_id is NOT used as the primary path because in admin/hive/research
         // contexts it may contain a hive assignment id, not the mle_skai_batch_run primary key.
@@ -16622,6 +16659,8 @@ $source = 'skai_prediction';
 $skaiSourceBatchId       = (int) $in->getInt('source_batch_id', 0);
 $skaiSourceBatchRunId    = (int) $in->getInt('source_batch_run_id', 0);
 $skaiSourceBatchRunOrder = (int) $in->getInt('source_batch_run_order', 0);
+if ($skaiSourceBatchId <= 0 && !empty($skaiSourceBatchIdForTarget)) { $skaiSourceBatchId = (int)$skaiSourceBatchIdForTarget; }
+if ($skaiSourceBatchRunOrder <= 0 && !empty($skaiSourceBatchRunOrderForTarget)) { $skaiSourceBatchRunOrder = (int)$skaiSourceBatchRunOrderForTarget; }
 $skaiBatchControlFlag    = (int) $in->getInt('batch_control_flag', 0);
 $skaiSourceBatchType     = preg_replace('/[^a-zA-Z0-9 _\-]/', '', (string) $in->getString('source_batch_type', ''));
 $skaiSourceBatchOrigin   = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $in->getString('source_batch_origin', ''));
@@ -61565,16 +61604,20 @@ document.addEventListener('DOMContentLoaded', function () {
     if (_bfUrlParam('mle_guided_mode') !== '') { _payload['mle_guided_mode'] = _bfUrlParam('mle_guided_mode'); }
     if (_bfUrlParam('mle_command_source') !== '') { _payload['mle_command_source'] = _bfUrlParam('mle_command_source'); }
 
-    if (r.combo && r.combo.mlePrecisionLock && r.combo.mleBatch) {
+    var _mleBatch = (r.combo && r.combo.mleBatch) ? r.combo.mleBatch : null;
+    var _ctxBatchId = (window.MLE_PRECISION_BATCH_CONTEXT && window.MLE_PRECISION_BATCH_CONTEXT.batch_id) ? window.MLE_PRECISION_BATCH_CONTEXT.batch_id : '';
+    var _batchIdResolved = parseInt((_mleBatch && _mleBatch.batch_id) || _ctxBatchId || _bfUrlParam('batch_id') || '0', 10) || 0;
+    var _batchOrderResolved = parseInt((_mleBatch && _mleBatch.batch_run_order) || _payload['batch_save_index'] || (idx + 1), 10) || (idx + 1);
+    if (_batchIdResolved > 0 || _batchOrderResolved > 0 || (r.combo && r.combo.mlePrecisionLock)) {
       _payload['origin_source'] = 'mle_precision_lock_batch';
-      _payload['source_batch_id'] = String(r.combo.mleBatch.batch_id || '');
-      _payload['source_batch_run_id'] = String(r.combo.mleBatch.batch_run_id || '');
-      _payload['source_batch_type'] = String(r.combo.mleBatch.batch_type || 'SKAI Precision Lock Batch');
-      _payload['source_batch_run_order'] = String(r.combo.mleBatch.batch_run_order || (idx + 1));
+      if (_batchIdResolved > 0) { _payload['source_batch_id'] = String(_batchIdResolved); }
+      if (_mleBatch && _mleBatch.batch_run_id) { _payload['source_batch_run_id'] = String(_mleBatch.batch_run_id); }
+      _payload['source_batch_type'] = String((_mleBatch && _mleBatch.batch_type) || 'SKAI Precision Lock Batch');
+      _payload['source_batch_run_order'] = String(_batchOrderResolved);
       _payload['source_batch_origin'] = 'mle_precision_lock_batch';
-      _payload['batch_control_flag'] = r.combo.mleBatch.is_control ? '1' : '0';
-      _payload['source_batch_test_variable'] = String(r.combo.mleBatch.test_variable || '');
-      _payload['source_batch_test_value'] = String(r.combo.mleBatch.test_value || '');
+      _payload['batch_control_flag'] = (_mleBatch && _mleBatch.is_control) ? '1' : '0';
+      _payload['source_batch_test_variable'] = String((_mleBatch && _mleBatch.test_variable) || '');
+      _payload['source_batch_test_value'] = String((_mleBatch && _mleBatch.test_value) || '');
     }
 
     // 5. Serialize payload to POST body

@@ -1357,10 +1357,11 @@ function mylottoexpertResolveOfficialDrawTarget($lotteryId, $gameId, $inputDateO
     $resolutionNote = '';
 
     // 1a. Try lottery row from DB
+    $lotRow = array();
     try {
         $db  = \Joomla\CMS\Factory::getDbo();
         $q   = $db->getQuery(true)
-            ->select($db->quoteName(array('game_id', 'timezone_id', 'draw_timezone', 'game_name')))
+            ->select($db->quoteName(array('game_id', 'timezone_id', 'draw_timezone', 'game_name', 'lottery_name')))
             ->from($db->quoteName('#__mle_lotteries'))
             ->where($db->quoteName('id') . ' = ' . $lotteryId);
         $db->setQuery($q, 0, 1);
@@ -1391,7 +1392,38 @@ function mylottoexpertResolveOfficialDrawTarget($lotteryId, $gameId, $inputDateO
         }
     }
 
-    // 1c. Site timezone as last fallback
+    // 1c. Safe state/game fallback mapping for lotteries that are missing timezone metadata.
+    // This prevents a blanket America/New_York default when timezone_id/draw_timezone is absent.
+    if ($resolvedTz === '') {
+        $gidUpper = strtoupper((string)$gameId);
+        $lotteryNameUpper = strtoupper(trim((string)($lotRow['lottery_name'] ?? $lotRow['game_name'] ?? '')));
+        $stateCode = '';
+        if (preg_match('/^(CA|TX|FL|WA)[A-Z0-9_\-]*/', $gidUpper, $__stateMatch)) {
+            $stateCode = (string)$__stateMatch[1];
+        } elseif (strpos($lotteryNameUpper, 'CALIFORNIA') !== false) {
+            $stateCode = 'CA';
+        } elseif (strpos($lotteryNameUpper, 'TEXAS') !== false) {
+            $stateCode = 'TX';
+        } elseif (strpos($lotteryNameUpper, 'FLORIDA') !== false) {
+            $stateCode = 'FL';
+        } elseif (strpos($lotteryNameUpper, 'WASHINGTON') !== false) {
+            $stateCode = 'WA';
+        }
+        $stateTimezoneMap = array(
+            'CA' => 'America/Los_Angeles',
+            'TX' => 'America/Chicago',
+            'FL' => 'America/New_York',
+            'WA' => 'America/Los_Angeles',
+        );
+        if ($stateCode !== '' && isset($stateTimezoneMap[$stateCode])) {
+            $resolvedTz = (string)$stateTimezoneMap[$stateCode];
+            $sourceReason = 'state_game_safe_fallback';
+            $resolutionNote = 'Resolved from safe state/game fallback map for game_id=' . $gameId . ', state=' . $stateCode . ', lottery_id=' . $lotteryId;
+        }
+        unset($stateTimezoneMap, $stateCode, $lotteryNameUpper, $__stateMatch);
+    }
+
+    // 1d. Site timezone as last fallback
     if ($resolvedTz === '') {
         try {
             $resolvedTz = (string)\Joomla\CMS\Factory::getConfig()->get('offset', 'America/New_York');
@@ -26612,6 +26644,7 @@ if ($__mleAction === 'create_skai_batch') {
             $__batchRunSettings['lottery_id'] = (int)$__batchLotteryId;
             $__batchRunSettings['lottery_name'] = (string)$__batchLotteryName;
             $__batchRunSettings['target_draw_date'] = (string)$__batchTargetDrawDate;
+            $__batchRunSettings['target_draw_at']              = !empty($__batchDrawTarget['target_draw_at']) ? (string)$__batchDrawTarget['target_draw_at'] : null;
             $__batchRunSettings['target_draw_timezone']        = (string)($__batchDrawTarget['target_draw_timezone']        ?? 'America/New_York');
             $__batchRunSettings['target_draw_label']           = (string)($__batchDrawTarget['target_draw_label']           ?? $__batchTargetDrawDate);
             $__batchRunSettings['target_draw_source']          = (string)($__batchDrawTarget['target_draw_source']          ?? 'lottery_timezone_resolver');
@@ -26689,6 +26722,62 @@ if ($__mleAction === 'create_skai_batch') {
         if ($__batchInsertedRunCount !== 9) {
             throw new \RuntimeException('Batch run rows were not saved as exactly nine.');
         }
+        /*
+         [[SKAI_DRAW_DATE_VALIDATION_SQL_2026_06_02]]
+         Validate draw-date/timezone preservation between #__mle_skai_batch_run.full_settings_json
+         and #__user_saved_numbers rows linked by source_batch_id + source_batch_run_order:
+
+         SELECT
+             r.batch_id,
+             r.run_order,
+             JSON_UNQUOTE(JSON_EXTRACT(r.full_settings_json, '$.target_draw_date')) AS batch_json_target_draw_date,
+             s.id AS saved_row_id,
+             s.target_draw_date AS saved_target_draw_date,
+             CASE
+                 WHEN JSON_UNQUOTE(JSON_EXTRACT(r.full_settings_json, '$.target_draw_date')) = s.target_draw_date
+                 THEN 'PASS'
+                 ELSE 'FAIL'
+             END AS target_draw_date_match,
+             JSON_UNQUOTE(JSON_EXTRACT(r.full_settings_json, '$.target_draw_timezone')) AS batch_json_timezone,
+             s.target_draw_timezone AS saved_timezone,
+             CASE
+                 WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.full_settings_json, '$.target_draw_timezone')), '') = COALESCE(s.target_draw_timezone, '')
+                 THEN 'PASS'
+                 ELSE 'FAIL'
+             END AS timezone_match,
+             JSON_UNQUOTE(JSON_EXTRACT(r.full_settings_json, '$.target_draw_label')) AS batch_json_label,
+             s.target_draw_label AS saved_label,
+             CASE
+                 WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.full_settings_json, '$.target_draw_label')), '') = COALESCE(s.target_draw_label, '')
+                 THEN 'PASS'
+                 ELSE 'FAIL'
+             END AS label_match,
+             s.source_batch_id,
+             s.source_batch_run_order,
+             s.target_draw_source,
+             s.target_draw_resolution_note
+         FROM jos9d_mle_skai_batch_run r
+         LEFT JOIN jos9d_user_saved_numbers s
+             ON s.source_batch_id = r.batch_id
+            AND s.source_batch_run_order = r.run_order
+         WHERE r.batch_id = NEW_BATCH_ID
+         ORDER BY r.run_order ASC;
+
+         Also audit lottery timezone metadata:
+
+         SELECT
+             id,
+             game_id,
+             lottery_name,
+             timezone_id,
+             draw_timezone
+         FROM jos9d_mle_lotteries
+         WHERE game_id IN ('CA1','TX1','TX2','FL3','WA6')
+            OR lottery_name LIKE '%California%'
+            OR lottery_name LIKE '%Texas%'
+            OR lottery_name LIKE '%Florida%'
+            OR lottery_name LIKE '%Washington%';
+        */
         unset($__batchRunIdx, $__batchRunLabel, $__batchRunOrder, $__batchIsControl, $__batchRunSettings, $__batchRunTestValue, $__batchRunSettingsJson, $__batchRunPhase, $__batchInsertedRunCount);
         $__batchOpenSkaiUrl = mleAdvisoryResolveSkaiBatchOpenUrl($db, $__batchLotteryId, $__batchHeaderId, $__batchTypeLabel);
         if (trim((string)$__batchOpenSkaiUrl) === '') {
