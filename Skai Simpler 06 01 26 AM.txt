@@ -42,6 +42,8 @@
 
 defined('_JEXEC') or die;
 
+define('MLE_SKAI_PHP_BUILD', '20260601');
+
 // [[SKAI_LOG_WARNINGS_HOTFIX_2026_05_15]] Hardened validation return shape and daily pick-size fallback.
 
 

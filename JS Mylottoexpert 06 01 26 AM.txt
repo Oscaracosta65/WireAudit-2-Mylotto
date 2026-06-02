@@ -1,3 +1,4 @@
+window.__MLE_CORE_JS_BUILD = '20260601';
 (function(){
   'use strict';
   if (window.__MLE_LOADING_EXPERIENCE_V1__) { return; }

@@ -2,6 +2,8 @@
 
 defined('_JEXEC') or die;
 
+define('MLE_CORE_PHP_BUILD', '20260601');
+
 $app  = \Joomla\CMS\Factory::getApplication();
 $user = \Joomla\CMS\Factory::getUser();
 $db   = \Joomla\CMS\Factory::getDbo();
