@@ -26005,8 +26005,12 @@ if ($__mleAction === 'create_skai_batch') {
         $__batchPrecisionLock = array('has_range'=>false,'range_min'=>0,'range_max'=>100,'stage'=>'global_hive_starting_prior','true_cluster_support'=>0,'true_cluster_draw_support'=>0);
         $__batchScoredDraws = 0;
         $__batchEvidenceIntel = array('current_locked_settings'=>array(),'true_cluster_support'=>0,'true_cluster_draw_support'=>0);
-        $__batchCurrentLock = array();
-        $__batchPersistedLock = array();
+        $__batchPersistedLock = mleAdvisoryLoadCurrentLockedSettings($db, $workspaceUserId, $__batchLotteryId);
+        if (!empty($__batchPersistedLock['has_active_lock'])) {
+            $__batchCurrentLock = array('has_active_lock' => true, 'persisted_lock_id' => (int)($__batchPersistedLock['id'] ?? 0), 'settings_array' => is_array($__batchPersistedLock['settings_array'] ?? null) ? $__batchPersistedLock['settings_array'] : array(), 'status' => (string)($__batchPersistedLock['locked_status'] ?? ''));
+        } else {
+            $__batchCurrentLock = array();
+        }
         $__batchSummary = array('total_runs'=>0,'scored_draws'=>0,'true_cluster_support'=>0,'true_cluster_draw_support'=>0,'global_learning_scope'=>'exact_lottery_only','v97_research_mode'=>$__batchV97ResearchMode);
     } else {
         $__batchTopMethod = $__batchMethods[0];
@@ -26162,6 +26166,24 @@ if ($__mleAction === 'create_skai_batch') {
     for ($__bvi = 1; $__bvi < count($__batchRunValues); $__bvi++) { $__bvk = trim((string)$__batchRunValues[$__bvi]); if ($__bvk === '' || isset($__batchValueSeen[$__bvk])) { $app->enqueueMessage('Batch test was not created because LottoExpert could not create 8 useful distinct test values from the current evidence.', 'error'); $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString()); return; } $__batchValueSeen[$__bvk] = true; }
     unset($__bvi, $__bvk, $__batchValueSeen);
 
+    $__batchSourceTrace = array(
+        'settings_source'         => 'v97_global_hive_starting_prior',
+        'learning_source'         => 'hardcoded_safe_default',
+        'source_priority'         => 'fallback',
+        'source_table'            => 'none',
+        'source_row_id'           => 0,
+        'base_settings_id'        => 0,
+        'locked_settings_id'      => 0,
+        'optimizer_snapshot_id'   => 0,
+        'shared_profile_id'       => 0,
+        'learning_performance_id' => 0,
+        'evidence_count'          => (int)($__batchPlan['source_evidence']['evidence_count'] ?? 0),
+        'confidence_level'        => 'fallback',
+        'hive_settings_fingerprint' => (string)($__batchPlan['source_evidence']['hive_settings_fingerprint'] ?? ''),
+        'evidence_summary'        => (string)($__batchPlan['evidence_line'] ?? ''),
+        'source_resolution_notes' => 'no_learned_source_found'
+    );
+
     $__batchBaseRunId = 0;
     $__batchBestScore = -PHP_FLOAT_MAX;
     foreach ($__batchPerf as $__bp) {
@@ -26174,9 +26196,28 @@ if ($__mleAction === 'create_skai_batch') {
     if ($__batchBaseRunId > 0 && !empty($__batchSavedById[$__batchBaseRunId])) {
         $__batchBaseSettings = mylottoexpertResolveEffectiveSettings($__batchSavedById[$__batchBaseRunId]);
     }
+    if ($__batchBaseRunId > 0 && !empty($__batchBaseSettings)) {
+        $__batchSourceTrace['settings_source']         = 'personal_best_scored_run';
+        $__batchSourceTrace['learning_source']         = 'user_saved_numbers';
+        $__batchSourceTrace['source_priority']         = 'personal_scored';
+        $__batchSourceTrace['source_table']            = 'user_saved_numbers';
+        $__batchSourceTrace['source_row_id']           = $__batchBaseRunId;
+        $__batchSourceTrace['base_settings_id']        = $__batchBaseRunId;
+        $__batchSourceTrace['confidence_level']        = 'personal';
+        $__batchSourceTrace['source_resolution_notes'] = 'personal_best_scored_run_used';
+    }
     if (!empty($__batchCurrentLock['has_active_lock']) && !empty($__batchCurrentLock['settings_array']) && is_array($__batchCurrentLock['settings_array'])) {
         $__batchBaseSettings = $__batchCurrentLock['settings_array'];
         $__batchBaseRunId = (int)($__batchPersistedLock['base_settings_id'] ?? $__batchPersistedLock['base_run_id'] ?? $__batchBaseRunId);
+        $__batchSourceTrace['settings_source']         = 'current_locked_settings';
+        $__batchSourceTrace['learning_source']         = 'mle_current_locked_settings';
+        $__batchSourceTrace['source_priority']         = 'locked';
+        $__batchSourceTrace['source_table']            = 'mle_current_locked_settings';
+        $__batchSourceTrace['source_row_id']           = (int)($__batchCurrentLock['persisted_lock_id'] ?? 0);
+        $__batchSourceTrace['locked_settings_id']      = (int)($__batchCurrentLock['persisted_lock_id'] ?? 0);
+        $__batchSourceTrace['base_settings_id']        = $__batchBaseRunId;
+        $__batchSourceTrace['confidence_level']        = 'locked';
+        $__batchSourceTrace['source_resolution_notes'] = 'active_locked_settings_applied';
     }
     if (empty($__batchBaseSettings) && $__batchRequestedPlan === 'horizon') {
 
@@ -26197,9 +26238,111 @@ if ($__mleAction === 'create_skai_batch') {
             '_mle_base_settings_fallback' => 'history_window_minimal',
         );
     }
+    if (empty($__batchBaseSettings)) {
+        // Priority 3: optimizer snapshot
+        if (mylottoexpertTableExistsSafe($db, $db->getPrefix() . 'mle_optimizer_snapshots')) {
+            $__batchOptRow = array();
+            try {
+                $__batchOptQ = $db->getQuery(true)->select('*')->from($db->quoteName('#__mle_optimizer_snapshots'))->where($db->quoteName('user_id') . ' = ' . (int)$workspaceUserId)->where($db->quoteName('lottery_id') . ' = ' . (int)$__batchLotteryId)->order($db->quoteName('updated_at') . ' DESC');
+                $db->setQuery($__batchOptQ, 0, 1);
+                $__batchOptRow = $db->loadAssoc();
+                if (!is_array($__batchOptRow)) { $__batchOptRow = array(); }
+            } catch (\Throwable $e) { $__batchOptRow = array(); }
+            if (!empty($__batchOptRow['id'])) {
+                $__batchOptSettings = array();
+                foreach (array('control_profile_json', 'batch_plan_json') as $__batchOptJsonKey) {
+                    $__batchOptRaw = trim((string)($__batchOptRow[$__batchOptJsonKey] ?? ''));
+                    if ($__batchOptRaw !== '') {
+                        $__batchOptDec = json_decode($__batchOptRaw, true);
+                        if (is_array($__batchOptDec)) {
+                            foreach (array('profile', 'settings', 'control_settings', 'base_settings') as $__batchOptSk) {
+                                if (!empty($__batchOptDec[$__batchOptSk]) && is_array($__batchOptDec[$__batchOptSk])) { $__batchOptSettings = $__batchOptDec[$__batchOptSk]; break; }
+                            }
+                            if (empty($__batchOptSettings) && !empty($__batchOptDec['skai_window_size'])) { $__batchOptSettings = $__batchOptDec; }
+                        }
+                    }
+                    if (!empty($__batchOptSettings)) { break; }
+                }
+                unset($__batchOptJsonKey, $__batchOptRaw, $__batchOptDec, $__batchOptSk);
+                if (!empty($__batchOptSettings) && is_array($__batchOptSettings)) {
+                    $__batchBaseSettings = $__batchOptSettings;
+                    $__batchOptConf = strtolower(trim((string)($__batchOptRow['confidence_level'] ?? 'learning')));
+                    $__batchSourceTrace['settings_source']         = 'optimizer_snapshot';
+                    $__batchSourceTrace['learning_source']         = 'mle_optimizer_snapshots';
+                    $__batchSourceTrace['source_priority']         = 'optimizer';
+                    $__batchSourceTrace['source_table']            = 'mle_optimizer_snapshots';
+                    $__batchSourceTrace['source_row_id']           = (int)($__batchOptRow['id'] ?? 0);
+                    $__batchSourceTrace['optimizer_snapshot_id']   = (int)($__batchOptRow['id'] ?? 0);
+                    $__batchSourceTrace['confidence_level']        = $__batchOptConf;
+                    $__batchSourceTrace['source_resolution_notes'] = 'optimizer_snapshot_control_profile_used';
+                    unset($__batchOptConf);
+                }
+                unset($__batchOptSettings);
+            }
+            unset($__batchOptRow, $__batchOptQ);
+        }
+    }
+    if (empty($__batchBaseSettings) && function_exists('mylottoexpertResolveBestHiveSettingsForSkaiRun')) {
+        // Priority 4: active shared Hive/global learning profile
+        $__batchHiveResult = mylottoexpertResolveBestHiveSettingsForSkaiRun($db, (string)($__batchSkaiMeta['gameId'] ?? ''), $__batchLotteryId, '', '');
+        if (!empty($__batchHiveResult['found']) && !empty($__batchHiveResult['settings']) && is_array($__batchHiveResult['settings'])) {
+            $__batchBaseSettings = $__batchHiveResult['settings'];
+            $__batchSourceTrace['settings_source']           = 'hive_shared_learning_profile';
+            $__batchSourceTrace['learning_source']           = 'skai_shared_learning_profiles';
+            $__batchSourceTrace['source_priority']           = 'hive_shared';
+            $__batchSourceTrace['source_table']              = 'skai_shared_learning_profiles';
+            $__batchSourceTrace['confidence_level']          = (string)($__batchHiveResult['confidence'] ?? 'medium');
+            $__batchSourceTrace['evidence_count']            = (int)($__batchHiveResult['evidence_count'] ?? 0);
+            $__batchSourceTrace['hive_settings_fingerprint'] = (string)($__batchHiveResult['hive_settings_fingerprint'] ?? '');
+            $__batchSourceTrace['source_resolution_notes']   = 'hive_shared_profile_base_settings_used';
+        }
+        unset($__batchHiveResult);
+    }
+    if (empty($__batchBaseSettings) && mylottoexpertTableExistsSafe($db, $db->getPrefix() . 'skai_learning_performance')) {
+        // Priority 5: recent scored performance profile
+        $__batchLpRow = array();
+        try {
+            $__batchLpQ = $db->getQuery(true)->select('*')->from($db->quoteName('#__skai_learning_performance'))->where($db->quoteName('user_id') . ' = ' . (int)$workspaceUserId)->where($db->quoteName('lottery_id') . ' = ' . (int)$__batchLotteryId)->where($db->quoteName('draw_date') . ' IS NOT NULL')->where($db->quoteName('draw_date') . ' <> ' . $db->quote('0000-00-00'))->order($db->quoteName('weighted_quality_score') . ' DESC');
+            if (!empty($__batchSkaiMeta['gameId'])) {
+                $__batchLpQ->where('(' . $db->quoteName('target_game_id') . ' = ' . $db->quote((string)$__batchSkaiMeta['gameId']) . ' OR ' . $db->quoteName('target_game_id') . ' = ' . $db->quote('') . ')');
+            }
+            $db->setQuery($__batchLpQ, 0, 1);
+            $__batchLpRow = $db->loadAssoc();
+            if (!is_array($__batchLpRow)) { $__batchLpRow = array(); }
+        } catch (\Throwable $e) { $__batchLpRow = array(); }
+        if (!empty($__batchLpRow['id']) && !empty($__batchLpRow['run_id'])) {
+            $__batchLpSavedId = (int)($__batchLpRow['run_id'] ?? 0);
+            $__batchLpSettings = array();
+            if ($__batchLpSavedId > 0 && !empty($__batchSavedById[$__batchLpSavedId])) {
+                $__batchLpSettings = mylottoexpertResolveEffectiveSettings($__batchSavedById[$__batchLpSavedId]);
+            }
+            if (!empty($__batchLpSettings) && is_array($__batchLpSettings)) {
+                $__batchBaseSettings = $__batchLpSettings;
+                $__batchBaseRunId = $__batchLpSavedId;
+                $__batchSourceTrace['settings_source']             = 'skai_learning_performance';
+                $__batchSourceTrace['learning_source']             = 'skai_learning_performance';
+                $__batchSourceTrace['source_priority']             = 'learning_performance';
+                $__batchSourceTrace['source_table']                = 'skai_learning_performance';
+                $__batchSourceTrace['source_row_id']               = (int)($__batchLpRow['id'] ?? 0);
+                $__batchSourceTrace['learning_performance_id']     = (int)($__batchLpRow['id'] ?? 0);
+                $__batchSourceTrace['base_settings_id']            = $__batchLpSavedId;
+                $__batchSourceTrace['confidence_level']            = (string)($__batchLpRow['confidence_level'] ?? 'learning');
+                $__batchSourceTrace['source_resolution_notes']     = 'learning_performance_best_scored_row_used';
+            }
+            unset($__batchLpSettings, $__batchLpSavedId);
+        }
+        unset($__batchLpRow, $__batchLpQ);
+    }
     if (empty($__batchBaseSettings) && !empty($__batchUseV97GlobalResearchDirect)) {
         $__batchBaseSettings = mylottoexpertV97BuildGlobalPriorBaseSettings($__batchSkaiMeta, $__batchSettingsAdv, $__batchPlan);
         $__batchBaseRunId = 0;
+        $__batchSourceTrace['settings_source']         = 'v97_global_hive_starting_prior';
+        $__batchSourceTrace['learning_source']         = 'hardcoded_safe_default';
+        $__batchSourceTrace['source_priority']         = 'fallback';
+        $__batchSourceTrace['source_table']            = 'none';
+        $__batchSourceTrace['source_row_id']           = 0;
+        $__batchSourceTrace['confidence_level']        = 'fallback';
+        $__batchSourceTrace['source_resolution_notes'] = 'v97_global_prior_no_learned_source_found';
     }
     if (empty($__batchBaseSettings)) {
         $app->enqueueMessage('Batch test was not created because the base settings record could not be confirmed. Please save one SKAI run for this lottery first, then try again.', 'error');
@@ -26329,6 +26472,26 @@ if ($__mleAction === 'create_skai_batch') {
             $__batchRunSettings['_mle_v101_assignment_refinement'] = (string)($__batchPlan['_mle_v101_assignment_policy'] ?? 'single_user_unique_first_assignment');
             $__batchRunSettings['_mle_v101_refinement_round'] = (int)($__batchPlan['_mle_v101_refinement_round'] ?? 0);
             $__batchRunSettings['_mle_v101_duplicate_group_key'] = (string)($__batchPlan['_mle_v101_duplicate_group_key'] ?? '');
+            $__batchRunSettings['settings_source']         = (string)($__batchSourceTrace['settings_source'] ?? '');
+            $__batchRunSettings['learning_source']         = (string)($__batchSourceTrace['learning_source'] ?? '');
+            $__batchRunSettings['source_priority']         = (string)($__batchSourceTrace['source_priority'] ?? 'fallback');
+            $__batchRunSettings['source_table']            = (string)($__batchSourceTrace['source_table'] ?? 'none');
+            $__batchRunSettings['source_row_id']           = (int)($__batchSourceTrace['source_row_id'] ?? 0);
+            $__batchRunSettings['base_settings_id']        = (int)($__batchSourceTrace['base_settings_id'] ?? 0);
+            $__batchRunSettings['locked_settings_id']      = (int)($__batchSourceTrace['locked_settings_id'] ?? 0);
+            $__batchRunSettings['optimizer_snapshot_id']   = (int)($__batchSourceTrace['optimizer_snapshot_id'] ?? 0);
+            $__batchRunSettings['shared_profile_id']       = (int)($__batchSourceTrace['shared_profile_id'] ?? 0);
+            $__batchRunSettings['learning_performance_id'] = (int)($__batchSourceTrace['learning_performance_id'] ?? 0);
+            $__batchRunSettings['evidence_summary']        = (string)($__batchSourceTrace['evidence_summary'] ?? '');
+            $__batchRunSettings['confidence_level']        = (string)($__batchSourceTrace['confidence_level'] ?? 'fallback');
+            $__batchRunSettings['evidence_count']          = (int)($__batchSourceTrace['evidence_count'] ?? 0);
+            $__batchRunSettings['hive_settings_fingerprint'] = (string)($__batchSourceTrace['hive_settings_fingerprint'] ?? '');
+            $__batchRunSettings['created_from']            = 'mylottoexpert_create_skai_batch';
+            $__batchRunSettings['selected_test_variable']  = (string)$__batchTestVar;
+            $__batchRunSettings['selected_test_value']     = (string)$__batchRunTestValue;
+            $__batchRunSettings['control_value']           = (string)($__batchPlan['batch_run_values'][0] ?? '');
+            $__batchRunSettings['is_control_run']          = (int)$__batchIsControl;
+            $__batchRunSettings['source_resolution_notes'] = (string)($__batchSourceTrace['source_resolution_notes'] ?? '');
             $__batchRunSettingsJson = json_encode($__batchRunSettings, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $db->setQuery(
                 "INSERT INTO `{$__batchRunTable}` (`batch_id`,`user_id`,`lottery_id`,`run_order`,`run_name`,`is_control`,`source`,`full_settings_json`,`test_variable`,`test_value`,`status`,`created_at`) VALUES ("
