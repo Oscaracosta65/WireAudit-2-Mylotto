@@ -16406,24 +16406,39 @@ $labelInput = implode(' - ', $parts);
         $skaiSourceBatchRunId = (int)$in->getInt('source_batch_run_id', 0);
         $skaiSourceBatchIdForTarget = (int)$in->getInt('source_batch_id', 0);
         $skaiSourceBatchRunOrderForTarget = (int)$in->getInt('source_batch_run_order', 0);
-        if ($skaiSourceBatchRunId > 0 || ($skaiSourceBatchIdForTarget > 0 && $skaiSourceBatchRunOrderForTarget > 0)) {
+        // [[SKAI_BATCH_TARGET_FIX_2026_06_02]] Canonical lookup is batch_id + run_order only.
+        // source_batch_run_id is NOT used as the primary path because in admin/hive/research
+        // contexts it may contain a hive assignment id, not the mle_skai_batch_run primary key.
+        // Using it as a primary path caused the wrong full_settings_json to be loaded, leaving
+        // has_valid_target_draw_date false and the save falling back to the live resolver date.
+        $skaiCanLookupByBatchRun = ($skaiSourceBatchIdForTarget > 0 && $skaiSourceBatchRunOrderForTarget > 0);
+        $skaiCanFallbackByRunId  = (!$skaiCanLookupByBatchRun && $skaiSourceBatchRunId > 0);
+        if ($skaiCanLookupByBatchRun || $skaiCanFallbackByRunId) {
             try {
                 $skaiRunTables = array_map('strtolower', array_keys((array)$db->getTableList()));
                 $skaiRunTable  = strtolower(str_replace('#__', $db->getPrefix(), '#__mle_skai_batch_run'));
                 if (in_array($skaiRunTable, $skaiRunTables, true)) {
                     $skaiRunQ = $db->getQuery(true)
-                        ->select($db->quoteName('full_settings_json'))
+                        ->select(array($db->quoteName('full_settings_json'), $db->quoteName('batch_id')))
                         ->from($db->quoteName('#__mle_skai_batch_run'));
-                    if ($skaiSourceBatchRunId > 0) {
-                        $skaiRunQ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchRunId);
-                    } else {
+                    if ($skaiCanLookupByBatchRun) {
                         $skaiRunQ
                             ->where($db->quoteName('batch_id') . ' = ' . (int)$skaiSourceBatchIdForTarget)
                             ->where($db->quoteName('run_order') . ' = ' . (int)$skaiSourceBatchRunOrderForTarget)
                             ->order($db->quoteName('id') . ' DESC');
+                    } else {
+                        $skaiRunQ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchRunId);
                     }
                     $db->setQuery($skaiRunQ, 0, 1);
-                    $skaiRunJson = (string)($db->loadResult() ?? '');
+                    $skaiRunRow = $db->loadAssoc();
+                    $skaiRunJson = ($skaiRunRow !== null) ? (string)($skaiRunRow['full_settings_json'] ?? '') : '';
+                    // Secondary fallback: verify the loaded row belongs to the declared source batch
+                    // when source_batch_id is known. Discard if batch_id does not match.
+                    if ($skaiCanFallbackByRunId && $skaiSourceBatchIdForTarget > 0 && $skaiRunRow !== null) {
+                        if ((int)($skaiRunRow['batch_id'] ?? 0) !== $skaiSourceBatchIdForTarget) {
+                            $skaiRunJson = '';
+                        }
+                    }
                     if ($skaiRunJson !== '') {
                         $skaiRunSettings = json_decode($skaiRunJson, true);
                         if (json_last_error() === JSON_ERROR_NONE && is_array($skaiRunSettings)) {
@@ -16462,13 +16477,13 @@ $labelInput = implode(' - ', $parts);
                                 $skaiBatchTargetDraw['target_draw_source'] = mb_substr($runTds, 0, 80, 'UTF-8');
                             }
                             $runTdrn = trim((string)($skaiRunSettings['target_draw_resolution_note'] ?? ''));
-                            if ($runTdrn !== '') {
-                                $skaiBatchTargetDraw['target_draw_resolution_note'] = $runTdrn;
-                            }
+                            $skaiBatchTargetDraw['target_draw_resolution_note'] = ($runTdrn !== '' ? ($runTdrn . ' | ') : '') . 'batch_json_loaded_for_run_order';
                         }
+                    } else {
+                        $skaiBatchTargetDraw['target_draw_resolution_note'] = 'batch_json_missing_for_run_order';
                     }
                 }
-                unset($skaiRunQ, $skaiRunJson, $skaiRunSettings, $runTdd, $runTda, $runTdtz, $runTdl, $runTds, $runTdrn, $runTdatTz, $runAtTz, $skaiRunTable, $skaiRunTables);
+                unset($skaiCanLookupByBatchRun, $skaiCanFallbackByRunId, $skaiRunQ, $skaiRunRow, $skaiRunJson, $skaiRunSettings, $runTdd, $runTda, $runTdtz, $runTdl, $runTds, $runTdrn, $runTdatTz, $runAtTz, $skaiRunTable, $skaiRunTables);
             } catch (\Throwable $__) { /* ignore and use resolver fallback */ }
         }
         if (!empty($skaiBatchTargetDraw['has_valid_target_draw_date'])) {
