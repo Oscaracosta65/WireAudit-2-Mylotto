@@ -356,7 +356,7 @@ window.__MLE_CORE_JS_BUILD = '20260601';
     return false;
   }
   function handleClick(ev){
-    var el = closest(ev.target, '.mle-open-skai-precision-batch, .mle-regular-skai-batch-action-btn, button[data-skai-url], button[data-skai-regular-url], a[data-skai-url], a[data-skai-regular-url], a[href*="skai-lottery-prediction"], .mle-v38-primary-action, .mle-v73-btn[data-mle-v73-action="run-batch"], .mle-v73-btn[data-mle-v73-action="open-skai"]');
+    var el = closest(ev.target, '.mle-open-skai-precision-batch, .mle-regular-skai-batch-action-btn, button[data-skai-url], button[data-skai-regular-url], a[data-skai-url], a[data-skai-regular-url], a[href*="skai-lottery-prediction"], .mle-v38-primary-action, .mle-v73-btn[data-mle-v73-action="open-skai"]');
     var card;
     var form;
     var url;

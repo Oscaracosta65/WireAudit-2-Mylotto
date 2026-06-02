@@ -26176,6 +26176,7 @@ if ($__mleAction === 'create_skai_batch') {
     if (!in_array($__batchRequestedPlan, array('recommended','horizon','settings','regular_9_batch'), true)) {
         $__batchRequestedPlan = 'recommended';
     }
+    error_log('[MLE 9BATCH] create_skai_batch entered user_id=' . (int)$workspaceUserId . ' lottery_id=' . (int)$__batchLotteryId . ' plan=' . $__batchRequestedPlan);
     $__batchRows = is_array($__batchActive[$__batchLotteryId]['rows'] ?? null) ? $__batchActive[$__batchLotteryId]['rows'] : array();
     $__batchTargetDrawDate = trim((string)$app->input->getString('target_draw_date', ''));
     if ($__batchTargetDrawDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $__batchTargetDrawDate)) {
