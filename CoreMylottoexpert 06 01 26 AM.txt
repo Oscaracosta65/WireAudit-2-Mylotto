@@ -31933,6 +31933,8 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
   $__advHasReadyPrecisionBatch = (!empty($__advBatchQueueReady) && $__advTopMKey === 'skai');
   $__advReadyHorizonSkaiUrl = '';
   $__advReadySettingsSkaiUrl = '';
+  $__advReadyHorizonBatchId = 0;
+  $__advReadySettingsBatchId = 0;
   if ($__advHasReadyPrecisionBatch) {
       foreach ((array)$__advBatchQueueReady as $__advReadyBatchRow) {
           $__advReadyBatchId = (int)($__advReadyBatchRow['id'] ?? 0);
@@ -31941,8 +31943,10 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
           $__advReadyBatchUrl = (string)mleAdvisoryResolveSkaiBatchOpenUrl($db, (int)$__advLid, $__advReadyBatchId);
           if ($__advReadyBatchUrl === '') { continue; }
           if ($__advReadyBatchPhase === 'horizon' && $__advReadyHorizonSkaiUrl === '') {
+              $__advReadyHorizonBatchId = $__advReadyBatchId;
               $__advReadyHorizonSkaiUrl = $__advReadyBatchUrl;
           } elseif ($__advReadyBatchPhase === 'settings' && $__advReadySettingsSkaiUrl === '') {
+              $__advReadySettingsBatchId = $__advReadyBatchId;
               $__advReadySettingsSkaiUrl = $__advReadyBatchUrl;
           }
       }
@@ -32349,6 +32353,7 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
   $__v38TargetPanel = (string)($__advActionJumpPanelId ?? '');
   $__v38ActionTarget = (string)($__advActionTargetMode ?? 'regular_skai_batch');
   $__v38UseSkaiUrl = true;
+  $__v38DirectSkaiUrl = '';
 
   if ($__v38ScoringKey === 'error') {
       $__v38StepTone = 'danger';
@@ -32425,8 +32430,30 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
       $__v38AfterText = 'After the batch has been run and the draw posts, LottoExpert will score it automatically so the best history window can be selected.';
       $__v38TargetSection = (string)($__advPrecisionBatchSectionId ?? $__advRecommendedBatchSectionId);
       $__v38TargetPanel = '';
-      $__v38ActionTarget = 'history_window_check';
-      $__v38UseSkaiUrl = false;
+      $__v38ReadyHorizonBatchId = (int)$__advReadyHorizonBatchId;
+      if ($__v38ReadyHorizonBatchId <= 0 && !empty($__advBatchQueueReady)) {
+          foreach ((array)$__advBatchQueueReady as $__v38ReadyBatchRow) {
+              $__v38CandidateBatchId = (int)($__v38ReadyBatchRow['id'] ?? 0);
+              if ($__v38CandidateBatchId <= 0) { continue; }
+              if (mleAdvisoryResolveBatchPhaseFromType((string)($__v38ReadyBatchRow['batch_type'] ?? '')) !== 'horizon') { continue; }
+              $__v38ReadyHorizonBatchId = $__v38CandidateBatchId;
+              break;
+          }
+      }
+      if ($__v38ReadyHorizonBatchId > 0) {
+          $__v38DirectSkaiUrl = (string)mleAdvisoryResolveSkaiBatchOpenUrl($db, (int)$__advLid, $__v38ReadyHorizonBatchId);
+          if ($__v38DirectSkaiUrl !== '' && strpos($__v38DirectSkaiUrl, 'batch_id=') !== false) {
+              $__v38ActionTarget = 'open-skai';
+              $__v38UseSkaiUrl = true;
+          } else {
+              $__v38DirectSkaiUrl = '';
+              $__v38ActionTarget = 'horizon_ready_batch';
+              $__v38UseSkaiUrl = false;
+          }
+      } else {
+          $__v38ActionTarget = 'horizon_ready_batch';
+          $__v38UseSkaiUrl = false;
+      }
   } elseif ($__v38PhaseKey === 'horizon_in_progress') {
       $__v38StepTone = 'action';
       $__v38StepBadge = 'Finish batch';
@@ -32610,6 +32637,7 @@ if (!isset($__skaiPerfAllHistory) || !is_array($__skaiPerfAllHistory)) {
               data-target-section="<?php echo $__v38TargetSectionEsc; ?>"
               <?php if ($__v38TargetPanelEsc !== ''): ?>data-target-panel="<?php echo $__v38TargetPanelEsc; ?>" data-open-details="<?php echo $__v38TargetPanelEsc; ?>"<?php endif; ?>
               data-mle-no-loading="1" data-skai-regular-url="<?php echo $__advRegularSkaiUrl; ?>"
+              data-skai-url="<?php echo htmlspecialchars((string)$__v38DirectSkaiUrl, ENT_QUOTES, 'UTF-8'); ?>"
               data-ready-horizon-skai-url="<?php echo htmlspecialchars($__advReadyHorizonSkaiUrl, ENT_QUOTES, 'UTF-8'); ?>"
               data-ready-settings-skai-url="<?php echo htmlspecialchars($__advReadySettingsSkaiUrl, ENT_QUOTES, 'UTF-8'); ?>"
               data-game-id="<?php echo $__advSkaiGameIdAttr; ?>"
