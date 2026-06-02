@@ -265,6 +265,96 @@ window.__MLE_CORE_JS_BUILD = '20260601';
     hay = text(el) + ' ' + String(el.className || '') + ' ' + String(el.getAttribute('data-action-target') || '');
     return /regular_skai_batch|regular_skai|global-learning|open skai global|9\s*-?batch/i.test(hay) && !!(el.getAttribute('data-skai-regular-url') || el.getAttribute('data-skai-url') || el.getAttribute('href'));
   }
+  function isCreateBatchForm(form){
+    return !!(form && qs('input[name="mle_action"][value="create_skai_batch"]', form));
+  }
+  function isFinalBatchSubmitTrigger(el, form){
+    var submitLike;
+    var typeAttr;
+    if (!el || !el.getAttribute) { return false; }
+    submitLike = closest(el, '[data-nine-batch-submit="1"],button[type="submit"],input[type="submit"]');
+    if (!submitLike) { submitLike = el; }
+    if (!form) { form = (submitLike && submitLike.form) ? submitLike.form : closest(submitLike, 'form'); }
+    if (!isCreateBatchForm(form)) { return false; }
+    if (String(submitLike.getAttribute('data-nine-batch-submit') || '') === '1') { return true; }
+    typeAttr = String(submitLike.getAttribute('type') || '').toLowerCase();
+    return typeAttr === 'submit' || typeAttr === 'image';
+  }
+  function resolveSummaryCard(el){
+    var targetCardId;
+    var lotteryId;
+    var card;
+    targetCardId = String(el.getAttribute('data-target-card') || '').replace(/^#/, '');
+    if (targetCardId) { card = document.getElementById(targetCardId); }
+    lotteryId = String(el.getAttribute('data-lottery-id') || '').replace(/[^0-9]/g, '');
+    if (!lotteryId && !card) {
+      card = closest(el, '.mle-lottery-outer');
+      lotteryId = String((card && card.getAttribute('data-outer-lottery-id')) || '').replace(/[^0-9]/g, '');
+    }
+    if (!card && lotteryId) {
+      card = qs('.mle-advisory-card[data-lottery-id="' + lotteryId + '"], .mle-lottery-outer[data-outer-lottery-id="' + lotteryId + '"], [data-mle-lottery-card][data-lottery-id="' + lotteryId + '"]', document);
+    }
+    if (!card) { card = closest(el, '.mle-advisory-card, .mle-lottery-outer'); }
+    return card || null;
+  }
+  function revealAncestors(node){
+    var cur = node;
+    while (cur && cur !== document.body) {
+      if (cur.tagName && String(cur.tagName).toLowerCase() === 'details') {
+        try { cur.open = true; } catch(ignoreOpen) {}
+        try { cur.setAttribute('open', 'open'); } catch(ignoreOpenAttr) {}
+      }
+      if (cur.classList) {
+        cur.classList.remove('collapsed', 'body-collapsed', 'is-collapsed', 'mle-is-collapsed');
+        cur.classList.add('open', 'is-open', 'is-expanded', 'mle-expanded', 'mle-is-expanded');
+      }
+      if (cur.style && cur.style.display === 'none') { cur.style.display = ''; }
+      try { cur.removeAttribute('hidden'); } catch(ignoreHidden) {}
+      try { cur.setAttribute('aria-hidden', 'false'); } catch(ignoreAriaHidden) {}
+      cur = cur.parentNode;
+    }
+  }
+  function openSummaryCard(card){
+    var body;
+    if (!card) { return; }
+    revealAncestors(card);
+    try { card.setAttribute('aria-expanded', 'true'); } catch(ignoreCardExpanded) {}
+    body = qs('.mle-advisory-card__body, .mle-lottery-outer-body, .mle-lottery-card-body, .mle-card-body, .mle-advisory-card-body', card);
+    if (body) {
+      revealAncestors(body);
+      if (body.style) { body.style.display = 'block'; }
+    }
+  }
+  function resolveSummaryTarget(el, card){
+    var targetId;
+    var panelId;
+    var target = null;
+    targetId = String(el.getAttribute('data-target-section') || '').replace(/^#/, '');
+    panelId = String(el.getAttribute('data-target-panel') || el.getAttribute('data-open-details') || '').replace(/^#/, '');
+    if (targetId) { target = document.getElementById(targetId); }
+    if (!target && panelId) { target = document.getElementById(panelId); }
+    if (!target && card && card.id) { target = card; }
+    if (!target) { target = card || resolveSummaryCard(el); }
+    return target || null;
+  }
+  function openAndJumpSummaryAction(el){
+    var card = resolveSummaryCard(el);
+    var target;
+    if (typeof window.mleActionJump === 'function') {
+      try { window.mleActionJump(el); return true; } catch(ignoreJump) {}
+    }
+    if (card) { openSummaryCard(card); }
+    target = resolveSummaryTarget(el, card);
+    if (target) {
+      revealAncestors(target);
+      try { target.setAttribute('aria-expanded', 'true'); } catch(ignoreTargetExpanded) {}
+      try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      catch (e1) { try { target.scrollIntoView(true); } catch (e2) {} }
+      try { target.focus({ preventScroll: true }); } catch(e3) { try { target.focus(); } catch(e4) {} }
+      return true;
+    }
+    return false;
+  }
   function handleClick(ev){
     var el = closest(ev.target, '.mle-open-skai-precision-batch, .mle-regular-skai-batch-action-btn, button[data-skai-url], button[data-skai-regular-url], a[data-skai-url], a[data-skai-regular-url], a[href*="skai-lottery-prediction"], .mle-v38-primary-action, .mle-v73-btn[data-mle-v73-action="run-batch"], .mle-v73-btn[data-mle-v73-action="open-skai"]');
     var card;
@@ -275,15 +365,26 @@ window.__MLE_CORE_JS_BUILD = '20260601';
     if (!el) { return; }
     action = String(el.getAttribute('data-action-target') || el.getAttribute('data-mle-v73-action') || '').toLowerCase();
 
-    if (action === 'history_window_check' || action === 'prediction_9_batch' || action === 'horizon_batch' || action === 'settings_batch' || action === 'next_settings' || action === 'precision_batch') {
+    if (action === 'history_window_check' || action === 'prediction_9_batch' || action === 'horizon_batch' || action === 'settings_batch' || action === 'next_settings' || action === 'precision_batch' || action === 'run-batch') {
       form = findInlineBatchForm(el);
-      if (form) {
+      if (isFinalBatchSubmitTrigger(el, form)) {
         ev.preventDefault();
         if (ev.stopPropagation) { ev.stopPropagation(); }
         if (ev.stopImmediatePropagation) { ev.stopImmediatePropagation(); }
-        submitCreateBatchForm(form, qs('[data-nine-batch-submit="1"],button[type="submit"],input[type="submit"]', form) || el);
+        if (!form) {
+          restoreHandoffButton(el);
+          clearSkaiHandoffLoading();
+          if (window.alert) { window.alert('The tracked 9-run batch form is missing. Please refresh and try again.'); }
+          return;
+        }
+        submitCreateBatchForm(form, closest(el, '[data-nine-batch-submit="1"],button[type="submit"],input[type="submit"]') || qs('[data-nine-batch-submit="1"],button[type="submit"],input[type="submit"]', form) || el);
         return;
       }
+      ev.preventDefault();
+      if (ev.stopPropagation) { ev.stopPropagation(); }
+      if (ev.stopImmediatePropagation) { ev.stopImmediatePropagation(); }
+      openAndJumpSummaryAction(el);
+      return;
     }
 
     if (hasClass(el, 'mle-open-skai-precision-batch')) {
@@ -7316,31 +7417,17 @@ function mleAdvisoryCardPrint(btn) {
     var state = btn.getAttribute('data-mle-action-state') || stateFor(btn, card);
     var mode = (btn.getAttribute('data-action-target') || '').toLowerCase();
     var target = explicitTarget(btn, card);
-    if (state === 'action' && mode === 'history_window_check') {
-      var readyHorizonUrl = btn.getAttribute('data-ready-horizon-skai-url') || '';
-      if (readyHorizonUrl) { return openSkaiInNewWindow(readyHorizonUrl); }
-    }
-    if (state === 'action' && mode === 'prediction_9_batch') {
-      var readySettingsUrl = btn.getAttribute('data-ready-settings-skai-url') || '';
-      if (readySettingsUrl) { return openSkaiInNewWindow(readySettingsUrl); }
-    }
-    if (state === 'action' && /^(horizon_ready_batch|settings_ready_batch)$/.test(mode)) {
-      if (openReadyPhaseBatch(card, mode)) { return true; }
-    }
-    if (state === 'action' && mode === 'history_window_check') {
-      if (qs('.mle-open-skai-precision-batch[data-batch-phase="horizon"]', card)) {
-        if (openReadyPhaseBatch(card, 'horizon_ready_batch')) { return true; }
+    if (state === 'action' && /^(history_window_check|prediction_9_batch|horizon_batch|settings_batch|next_settings|precision_batch|run-batch|horizon_ready_batch|settings_ready_batch)$/.test(mode)) {
+      if (typeof window.mleActionJump === 'function') {
+        try { window.mleActionJump(btn); } catch(ignoreJumpAction) {}
+      } else if (target) {
+        flash(target);
+      } else if (batchTarget(card)) {
+        flash(batchTarget(card));
+      } else {
+        flash(card);
       }
-      if (submitActionBatchForm(card, btn, 'horizon_batch')) { return true; }
-    }
-    if (state === 'action' && mode === 'prediction_9_batch') {
-      if (qs('.mle-open-skai-precision-batch[data-batch-phase="settings"]', card)) {
-        if (openReadyPhaseBatch(card, 'settings_ready_batch')) { return true; }
-      }
-      if (submitActionBatchForm(card, btn, 'settings_batch')) { return true; }
-    }
-    if (state === 'action' && /^(next_settings|settings_batch|horizon_batch)$/.test(mode)) {
-      if (submitActionBatchForm(card, btn, mode)) { return true; }
+      return true;
     }
     if (state === 'action' && (mode === 'regular_skai_batch' || mode === 'regular_skai')) {
       if (submitActionBatchForm(card, btn, mode)) { return true; }
