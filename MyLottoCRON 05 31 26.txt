@@ -390,6 +390,61 @@ function lecron_json_encode($value)
     return ($json === false) ? '{}' : $json;
 }
 
+function lecron_effective_game_id(array $row)
+{
+    $target = strtoupper(trim((string)($row['target_game_id'] ?? '')));
+    if ($target !== '') {
+        return $target;
+    }
+    return strtoupper(trim((string)($row['game_id'] ?? '')));
+}
+
+function lecron_effective_lottery_id(array $row)
+{
+    $target = (int)($row['target_lottery_id'] ?? 0);
+    if ($target > 0) {
+        return $target;
+    }
+    $legacy = (int)($row['lottery_id'] ?? 0);
+    return $legacy > 0 ? $legacy : 0;
+}
+
+function lecron_effective_game_sql($db, array $cols)
+{
+    $parts = array();
+    if (lecron_has_col($cols, 'target_game_id')) {
+        $parts[] = 'NULLIF(TRIM(' . $db->quoteName('target_game_id') . '), ' . $db->quote('') . ')';
+    }
+    if (lecron_has_col($cols, 'game_id')) {
+        $parts[] = 'NULLIF(TRIM(' . $db->quoteName('game_id') . '), ' . $db->quote('') . ')';
+    }
+    if (empty($parts)) {
+        return '';
+    }
+    if (count($parts) === 1) {
+        return $parts[0];
+    }
+    return 'COALESCE(' . implode(', ', $parts) . ')';
+}
+
+function lecron_effective_lottery_sql($db, array $cols)
+{
+    $parts = array();
+    if (lecron_has_col($cols, 'target_lottery_id')) {
+        $parts[] = 'NULLIF(' . $db->quoteName('target_lottery_id') . ', 0)';
+    }
+    if (lecron_has_col($cols, 'lottery_id')) {
+        $parts[] = 'NULLIF(' . $db->quoteName('lottery_id') . ', 0)';
+    }
+    if (empty($parts)) {
+        return '';
+    }
+    if (count($parts) === 1) {
+        return $parts[0];
+    }
+    return 'COALESCE(' . implode(', ', $parts) . ')';
+}
+
 function lecron_load_lottery_spec($gameId)
 {
     static $cache = array();
@@ -646,6 +701,9 @@ function lecron_draw_result_parts($drawRow, array $cfg, array $savedRow)
 function lecron_get_draw_by_date($db, $gameId, $drawDate, $drawSession, $drawAt, array $savedRow)
 {
     $gameId = strtoupper(trim((string)$gameId));
+    if ($gameId === '') {
+        $gameId = lecron_effective_game_id($savedRow);
+    }
     $drawDate = trim((string)$drawDate);
     if ($gameId === '' || $drawDate === '') {
         return array('found' => false, 'message' => 'missing_game_or_draw_date');
@@ -672,6 +730,7 @@ function lecron_get_draw_by_date($db, $gameId, $drawDate, $drawSession, $drawAt,
     if (!lecron_has_col($cols, 'draw_date')) {
         return array('found' => false, 'message' => 'draw_table_missing_draw_date');
     }
+    $effectiveLotteryId = lecron_effective_lottery_id($savedRow);
     try {
         $q = $db->getQuery(true)
             ->select('*')
@@ -679,6 +738,9 @@ function lecron_get_draw_by_date($db, $gameId, $drawDate, $drawSession, $drawAt,
             ->where('DATE(' . $db->quoteName('draw_date') . ') = ' . $db->quote($dateOnly));
         if (lecron_has_col($cols, 'game_id')) {
             $q->where($db->quoteName('game_id') . ' = ' . $db->quote($gameId));
+        }
+        if ($effectiveLotteryId > 0 && lecron_has_col($cols, 'lottery_id')) {
+            $q->where($db->quoteName('lottery_id') . ' = ' . (int)$effectiveLotteryId);
         }
         $drawSession = strtolower(trim((string)$drawSession));
         if ($drawSession !== '' && lecron_has_col($cols, 'draw_session')) {
@@ -759,7 +821,7 @@ function lecron_find_candidates($db, $limit)
     if (!lecron_has_col($cols, 'id')) {
         return array();
     }
-    $wanted = array('id','user_id','lottery_id','target_lottery_id','game_id','target_game_id','source','origin_source','analysis_method_key','analysis_engine_label','analysis_track_label','model_family','batch_type','focus_profile','risk_profile','strategy_profile','label','main_numbers','extra_ball_numbers','regular_main_numbers_json','regular_extra_numbers_json','main_display_json','extra_display_json','ranked_main_numbers_json','ranked_extra_numbers_json','prediction_family','prediction_type','target_prediction_family','target_prediction_type','target_draw_date','next_draw_date','target_draw_at','next_draw_at','target_draw_session','draw_session','target_pick_size','target_extra_count','prediction_target_id','prediction_target_key','run_uuid','snapshot_run_uuid','batch_uuid','hive_queue_id','hive_assignment_id','hive_settings_fingerprint','hive_intake_mode','hive_contract_status','evaluation_status','actual_draw_date','evaluated_at','settings_json','settings','hive_cron_last_checked_at','hive_cron_next_check_at','hive_cron_wait_reason','hive_cron_attempt_count');
+    $wanted = array('id','user_id','lottery_id','target_lottery_id','game_id','target_game_id','source','origin_source','save_intent','play_status','source_batch_id','source_batch_run_order','analysis_method_key','analysis_engine_label','analysis_track_label','model_family','batch_type','focus_profile','risk_profile','strategy_profile','label','main_numbers','extra_ball_numbers','regular_main_numbers_json','regular_extra_numbers_json','main_display_json','extra_display_json','ranked_main_numbers_json','ranked_extra_numbers_json','prediction_family','prediction_type','target_prediction_family','target_prediction_type','target_draw_date','next_draw_date','target_draw_at','next_draw_at','target_draw_session','draw_session','target_pick_size','target_extra_count','prediction_target_id','prediction_target_key','run_uuid','snapshot_run_uuid','batch_uuid','hive_queue_id','hive_assignment_id','hive_settings_fingerprint','hive_intake_mode','hive_contract_status','evaluation_status','actual_draw_date','evaluated_at','settings_json','settings','hive_cron_last_checked_at','hive_cron_next_check_at','hive_cron_wait_reason','hive_cron_attempt_count');
     $select = lecron_select_existing($db, $cols, $wanted);
     if (empty($select)) {
         $select = array($db->quoteName('id'));
@@ -779,7 +841,7 @@ function lecron_find_candidates($db, $limit)
     if (lecron_has_col($cols, 'batch_uuid')) {
         $candidateOr[] = lecron_nonempty_sql($db, 'batch_uuid');
     }
-    foreach (array('source','origin_source','analysis_method_key','model_family','batch_type','focus_profile','hive_intake_mode') as $methodCol) {
+    foreach (array('source','origin_source','save_intent','analysis_method_key','model_family','batch_type','focus_profile','hive_intake_mode') as $methodCol) {
         if (!lecron_has_col($cols, $methodCol)) {
             continue;
         }
@@ -791,6 +853,23 @@ function lecron_find_candidates($db, $limit)
         $candidateOr[] = $methodExpr . ' LIKE ' . $db->quote('%mcmc%');
         $candidateOr[] = $methodExpr . ' LIKE ' . $db->quote('%skip%');
         $candidateOr[] = $methodExpr . ' LIKE ' . $db->quote('%hit%');
+        $candidateOr[] = $methodExpr . ' = ' . $db->quote('skai_prediction');
+        $candidateOr[] = $methodExpr . ' = ' . $db->quote('prediction_archive');
+        $candidateOr[] = $methodExpr . ' = ' . $db->quote('mle_precision_lock_batch');
+        $candidateOr[] = $methodExpr . ' = ' . $db->quote('hive_ready');
+        $candidateOr[] = $methodExpr . ' = ' . $db->quote('tracking_ready');
+    }
+    if (lecron_has_col($cols, 'source')) {
+        $candidateOr[] = 'LOWER(TRIM(' . $db->quoteName('source') . ')) = ' . $db->quote('skai_prediction');
+    }
+    if (lecron_has_col($cols, 'save_intent')) {
+        $candidateOr[] = 'LOWER(TRIM(' . $db->quoteName('save_intent') . ')) = ' . $db->quote('prediction_archive');
+    }
+    if (lecron_has_col($cols, 'origin_source')) {
+        $candidateOr[] = 'LOWER(TRIM(' . $db->quoteName('origin_source') . ')) = ' . $db->quote('mle_precision_lock_batch');
+    }
+    if (lecron_has_col($cols, 'hive_contract_status')) {
+        $candidateOr[] = 'LOWER(TRIM(' . $db->quoteName('hive_contract_status') . ')) IN (' . implode(',', array($db->quote('hive_ready'), $db->quote('tracking_ready'))) . ')';
     }
 
     $numberOr = array();
@@ -819,15 +898,19 @@ function lecron_find_candidates($db, $limit)
         $where[] = 'DATE(' . $db->quoteName('next_draw_date') . ') <= ' . $db->quote(date('Y-m-d'));
     }
 
-    $gameOr = array();
-    if (lecron_has_col($cols, 'target_game_id')) {
-        $gameOr[] = lecron_nonempty_sql($db, 'target_game_id');
+    $effectiveGameExpr = lecron_effective_game_sql($db, $cols);
+    if ($effectiveGameExpr !== '') {
+        $where[] = $effectiveGameExpr . ' IS NOT NULL';
     }
-    if (lecron_has_col($cols, 'game_id')) {
-        $gameOr[] = lecron_nonempty_sql($db, 'game_id');
+    $effectiveLotteryExpr = lecron_effective_lottery_sql($db, $cols);
+    if ($effectiveLotteryExpr !== '') {
+        $where[] = $effectiveLotteryExpr . ' IS NOT NULL';
     }
-    if (!empty($gameOr)) {
-        $where[] = '(' . implode(' OR ', $gameOr) . ')';
+    if (lecron_has_col($cols, 'play_status')) {
+        $where[] = '(' . $db->quoteName('play_status') . ' IS NULL OR TRIM(' . $db->quoteName('play_status') . ') = ' . $db->quote('') . ' OR LOWER(TRIM(' . $db->quoteName('play_status') . ')) = ' . $db->quote('draft') . ')';
+    }
+    if (lecron_has_col($cols, 'hive_contract_status')) {
+        $where[] = '(' . $db->quoteName('hive_contract_status') . ' IS NULL OR TRIM(' . $db->quoteName('hive_contract_status') . ') = ' . $db->quote('') . ' OR LOWER(TRIM(' . $db->quoteName('hive_contract_status') . ')) IN (' . implode(',', array($db->quote('hive_ready'), $db->quote('tracking_ready'))) . '))';
     }
 
     $rerunAll = lecron_rerun_all_enabled();
@@ -852,7 +935,22 @@ function lecron_find_candidates($db, $limit)
             }
         }
         if ($dateCol !== '') {
-            $q->order('DATE(' . $db->quoteName($dateCol) . ') ASC, ' . $db->quoteName('id') . ' ASC');
+            $order = array();
+            if ((int)$limit > 0 && lecron_has_col($cols, 'hive_cron_attempt_count')) {
+                $order[] = 'COALESCE(' . $db->quoteName('hive_cron_attempt_count') . ',0) ASC';
+            }
+            $order[] = 'DATE(' . $db->quoteName($dateCol) . ') ASC';
+            if ((int)$limit > 0 && lecron_has_col($cols, 'hive_cron_last_checked_at')) {
+                $order[] = 'COALESCE(' . $db->quoteName('hive_cron_last_checked_at') . ',' . $db->quote('1970-01-01 00:00:00') . ') ASC';
+            }
+            if (lecron_has_col($cols, 'source_batch_id')) {
+                $order[] = 'COALESCE(' . $db->quoteName('source_batch_id') . ',0) ASC';
+            }
+            if (lecron_has_col($cols, 'source_batch_run_order')) {
+                $order[] = 'COALESCE(' . $db->quoteName('source_batch_run_order') . ',0) ASC';
+            }
+            $order[] = $db->quoteName('id') . ' ASC';
+            $q->order(implode(', ', $order));
         } else {
             $q->order($db->quoteName('id') . ' ASC');
         }
@@ -1131,7 +1229,7 @@ function lecron_insert_learning_event($db, array $row, array $score, $dryRun)
         'saved_row_id' => (int)$row['id'],
         'user_saved_id' => (int)$row['id'],
         'user_id' => (int)($row['user_id'] ?? 0),
-        'lottery_id' => (int)(($row['target_lottery_id'] ?? 0) ?: ($row['lottery_id'] ?? 0)),
+        'lottery_id' => lecron_effective_lottery_id($row),
         'draw_date' => $eventDrawDate,
         'actual_draw_date' => $eventDrawDate,
         'main_hits_count' => (int)$score['main_hits'],
@@ -1340,7 +1438,7 @@ function lecron_upsert_performance($db, array $row, array $score, $dryRun)
     );
     $values = array(
         'user_id' => (int)($row['user_id'] ?? 0),
-        'lottery_id' => (int)(($row['target_lottery_id'] ?? 0) ?: ($row['lottery_id'] ?? 0)),
+        'lottery_id' => lecron_effective_lottery_id($row),
         'lottery_name' => '',
         'draw_date' => (string)$score['actual_draw_date'],
         'run_date' => $now,
@@ -1351,7 +1449,7 @@ function lecron_upsert_performance($db, array $row, array $score, $dryRun)
         'prediction_target_id' => (string)($row['prediction_target_id'] ?? ''),
         'prediction_target_key' => (string)($row['prediction_target_key'] ?? ''),
         'target_game_id' => (string)$score['game_id'],
-        'target_lottery_id' => (int)(($row['target_lottery_id'] ?? 0) ?: ($row['lottery_id'] ?? 0)),
+        'target_lottery_id' => lecron_effective_lottery_id($row),
         'target_draw_date' => (string)$score['actual_draw_date'],
         'target_draw_at' => (string)($row['target_draw_at'] ?? $row['next_draw_at'] ?? ''),
         'target_draw_session' => (string)($row['target_draw_session'] ?? $row['draw_session'] ?? ''),
@@ -1495,8 +1593,11 @@ function lecron_rank_metrics(array $predictedMain, array $actualMain)
 
 function lecron_score_row($db, array $row)
 {
-    $gameId = strtoupper(trim((string)(($row['target_game_id'] ?? '') !== '' ? $row['target_game_id'] : ($row['game_id'] ?? ''))));
-    $drawDate = trim((string)(($row['target_draw_date'] ?? '') !== '' ? $row['target_draw_date'] : ($row['next_draw_date'] ?? '')));
+    $gameId = lecron_effective_game_id($row);
+    $drawDate = trim((string)($row['target_draw_date'] ?? ''));
+    if ($drawDate === '') {
+        $drawDate = trim((string)($row['next_draw_date'] ?? ''));
+    }
     $drawSession = trim((string)(($row['target_draw_session'] ?? '') !== '' ? $row['target_draw_session'] : ($row['draw_session'] ?? '')));
     $drawAt = trim((string)(($row['target_draw_at'] ?? '') !== '' ? $row['target_draw_at'] : ($row['next_draw_at'] ?? '')));
     if ($gameId === '' || $drawDate === '') {
@@ -1757,8 +1858,8 @@ try {
             }
             $summary['scored']++;
             $summary['items'][] = array('saved_row_id' => $savedId, 'status' => 'scored', 'lane' => $lane, 'game_id' => (string)$score['game_id'], 'draw_date' => (string)$score['actual_draw_date'], 'main_hits' => (int)$score['main_hits'], 'extra_hits' => (int)$score['extra_hits'], 'learning_score' => (float)$score['learning_score']);
-            $profileGameId = (string)($score['game_id'] ?? ($row['target_game_id'] ?? $row['game_id'] ?? ''));
-            $profileLotteryId = (int)($row['target_lottery_id'] ?? $row['lottery_id'] ?? 0);
+            $profileGameId = (string)($score['game_id'] ?? lecron_effective_game_id($row));
+            $profileLotteryId = lecron_effective_lottery_id($row);
             $profileKey = $profileGameId . ':' . (string)$profileLotteryId;
             if ($profileGameId !== '' || $profileLotteryId > 0) { $touchedProfiles[$profileKey] = array('game_id'=>$profileGameId, 'lottery_id'=>$profileLotteryId); }
             lecron_log('scored saved_row_id=' . $savedId . ' lane=' . $lane . ' game_id=' . (string)$score['game_id'] . ' draw=' . (string)$score['actual_draw_date'] . ' hits=' . (int)$score['main_hits'] . '+' . (int)$score['extra_hits'] . ' score=' . (float)$score['learning_score'] . ($dryRun ? ' dry_run=1' : ''));
