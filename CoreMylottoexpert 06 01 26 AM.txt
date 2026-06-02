@@ -10816,6 +10816,118 @@ if (!function_exists('mylottoexpertV168RenderBatchCoverageCenter')) {
     }
 }
 
+if (!function_exists('mylottoexpertV169RenderBatchRecoveryManager')) {
+    function mylottoexpertV169RenderBatchRecoveryManager($db, $limit = 60)
+    {
+        $user = \Joomla\CMS\Factory::getUser();
+        $isAdmin = (!$user->guest && $user->authorise('core.admin'));
+        if (!$isAdmin) {
+            return '';
+        }
+        $data = mylottoexpertLoadAdminBatchRecoveryRows($db, $limit);
+        $items = (array)($data['items'] ?? array());
+        $totals = (array)($data['totals'] ?? array());
+        ob_start();
+        ?>
+        <section id="mle-v169-batch-recovery-manager" class="mle-ci-layer-card" style="margin-top:1rem;border:2px solid #7c3aed;" aria-label="Batch Recovery and Stuck Batch Manager">
+          <div class="mle-ci-layer-card__head">
+            <span class="mle-ci-layer-card__eyebrow">Admin Only</span>
+            <span class="mle-ci-layer-card__title">Batch Recovery / Stuck Batch Manager</span>
+          </div>
+          <div class="mle-ci-layer-card__body">
+            <style>
+              #mle-v169-batch-recovery-manager .mle-v169-status{display:inline-flex;align-items:center;border-radius:999px;padding:.22rem .58rem;font-size:.72rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;border:1px solid #d8b4fe;background:#faf5ff;color:#6b21a8;}
+              #mle-v169-batch-recovery-manager .mle-v169-status--ready{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;}
+              #mle-v169-batch-recovery-manager .mle-v169-status--partial{background:#fffbeb;color:#b45309;border-color:#fde68a;}
+              #mle-v169-batch-recovery-manager .mle-v169-status--failed{background:#fef2f2;color:#b91c1c;border-color:#fecaca;}
+              #mle-v169-batch-recovery-manager table{width:100%;border-collapse:collapse;font-size:12px;}
+              #mle-v169-batch-recovery-manager th,#mle-v169-batch-recovery-manager td{padding:7px 8px;border-bottom:1px solid #ede9fe;text-align:left;vertical-align:top;}
+              #mle-v169-batch-recovery-manager thead th{background:#faf5ff;color:#581c87;font-weight:800;position:sticky;top:0;}
+              #mle-v169-batch-recovery-manager .mle-v169-open-link{display:inline-flex;align-items:center;justify-content:center;padding:.46rem .72rem;border-radius:8px;background:#581c87;color:#fff;text-decoration:none;font-weight:700;white-space:nowrap;}
+              #mle-v169-batch-recovery-manager .mle-v169-open-link:hover{background:#6d28d9;color:#fff;}
+              #mle-v169-batch-recovery-manager .mle-v169-muted{color:#6b7280;}
+            </style>
+            <p class="mle-v123-section-note">This admin-safe recovery view lists recent 9-run SKAI batches that are not fully healthy yet. Open in SKAI uses the batch header lottery_id plus the best available game_id from batch JSON first, then lottery metadata.</p>
+            <div class="mle-v123-kpi-grid" style="margin-top:1rem;">
+              <div class="mle-v123-kpi"><span>Batches shown</span><strong><?php echo (int)($totals['shown'] ?? 0); ?></strong></div>
+              <div class="mle-v123-kpi"><span>Ready / not started</span><strong><?php echo (int)($totals['ready'] ?? 0); ?></strong></div>
+              <div class="mle-v123-kpi"><span>Partially generated</span><strong><?php echo (int)($totals['partial'] ?? 0); ?></strong></div>
+              <div class="mle-v123-kpi"><span>Failed headers</span><strong><?php echo (int)($totals['failed'] ?? 0); ?></strong></div>
+              <div class="mle-v123-kpi"><span>Missing safe SKAI URL</span><strong><?php echo (int)($totals['missing_skai_url'] ?? 0); ?></strong></div>
+            </div>
+            <?php if (!empty($data['warnings'])): ?>
+              <div class="mle-ci-callout" style="margin-top:.85rem;"><span class="mle-ci-callout__label">Recovery warnings</span><p><?php echo htmlspecialchars(implode(' | ', (array)$data['warnings']), ENT_QUOTES, 'UTF-8'); ?></p></div>
+            <?php endif; ?>
+            <div style="overflow:auto;margin-top:.9rem;max-height:560px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>batch_id</th>
+                    <th>user_id</th>
+                    <th>lottery_id</th>
+                    <th>lottery_name</th>
+                    <th>batch_type</th>
+                    <th>header status</th>
+                    <th>created_at</th>
+                    <th>run row count</th>
+                    <th>generated run count</th>
+                    <th>pending run count</th>
+                    <th>saved row count</th>
+                    <th>target draw date</th>
+                    <th>target draw timezone</th>
+                    <th>target game id</th>
+                    <th>action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <?php if (empty($items)): ?>
+                    <tr>
+                      <td colspan="15">No recovery candidates were found in the recent batch window.</td>
+                    </tr>
+                  <?php else: ?>
+                    <?php foreach ($items as $item): ?>
+                      <?php
+                        $status = strtolower(trim((string)($item['_computed_status'] ?? ($item['status'] ?? 'pending'))));
+                        $statusCss = 'mle-v169-status';
+                        if ($status === 'failed') { $statusCss .= ' mle-v169-status--failed'; }
+                        elseif (!empty($item['_is_in_progress'])) { $statusCss .= ' mle-v169-status--partial'; }
+                        else { $statusCss .= ' mle-v169-status--ready'; }
+                      ?>
+                      <tr>
+                        <td><?php echo (int)($item['id'] ?? 0); ?></td>
+                        <td><?php echo (int)($item['user_id'] ?? 0); ?></td>
+                        <td><?php echo (int)($item['lottery_id'] ?? 0); ?></td>
+                        <td><?php echo htmlspecialchars((string)($item['lottery_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+                        <td><?php echo htmlspecialchars((string)($item['batch_type'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+                        <td><span class="<?php echo htmlspecialchars($statusCss, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string)($item['_computed_status'] ?? ($item['status'] ?? 'pending')), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                        <td><?php echo htmlspecialchars((string)($item['created_at'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+                        <td><?php echo (int)($item['run_row_count'] ?? 0); ?></td>
+                        <td><?php echo (int)($item['generated_run_count'] ?? 0); ?></td>
+                        <td><?php echo (int)($item['pending_run_count'] ?? 0); ?></td>
+                        <td><?php echo (int)($item['saved_row_count'] ?? 0); ?></td>
+                        <td><?php echo htmlspecialchars((string)($item['target_draw_date'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+                        <td><?php echo htmlspecialchars((string)($item['target_draw_timezone'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+                        <td><?php echo htmlspecialchars((string)($item['target_game_id'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+                        <td>
+                          <?php if (!empty($item['open_skai_url'])): ?>
+                            <a class="mle-v169-open-link" href="<?php echo htmlspecialchars((string)$item['open_skai_url'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer">Open in SKAI</a>
+                          <?php else: ?>
+                            <span class="mle-v169-muted">Missing game_id context</span>
+                          <?php endif; ?>
+                        </td>
+                      </tr>
+                    <?php endforeach; ?>
+                  <?php endif; ?>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+        <?php
+        return ob_get_clean();
+    }
+}
+
 function mylottoexpertV116ColumnExists($db, $table, $column)
 {
     try {
@@ -15385,6 +15497,7 @@ if (!function_exists('mylottoexpertPhase49AdminLiteLauncher')) {
         };
         $links = array(
             array('Admin Operations', 'Queue seeding, learning ingest, contract backfill, reconciliation, and safe repair controls.', $makeUrl('mle_admin_tools')),
+            array('Batch Recovery', 'Inspect stuck 9-run SKAI batches and reopen them in SKAI with safe batch context.', $makeUrl('mle_batch_admin')),
             array('Duplicate Batch Audit', 'Open duplicate-batch integrity tools only when you need to inspect or repair duplicate saved batches.', $makeUrl('mle_dbi_load')),
             array('Maintenance Tools', 'Open schema/maintenance controls only when intentionally performing maintenance.', $makeUrl('mle_maintenance')),
             array('Performance Diagnostics', 'Open browser-side performance diagnostics for this workspace.', $makeUrl('mle_perf_diag')),
@@ -15635,6 +15748,8 @@ function mylottoexpertV100RenderAdminHiveResearchDashboard($db, $user)
       <?php if (function_exists('mylottoexpertV167RenderResourceAllocationCenter')) { echo mylottoexpertV167RenderResourceAllocationCenter($db, max(20, min(60, (int)$displayLimit))); } ?>
 
       <?php if (function_exists('mylottoexpertV168RenderBatchCoverageCenter')) { echo mylottoexpertV168RenderBatchCoverageCenter($db, max(30, min(120, (int)$displayLimit * 3))); } ?>
+
+      <?php if (function_exists('mylottoexpertV169RenderBatchRecoveryManager')) { echo mylottoexpertV169RenderBatchRecoveryManager($db, max(20, min(80, (int)$displayLimit * 2))); } ?>
 
       <section class="mle-ci-layer-card" style="margin-top:1rem;" aria-label="Admin Execution Center">
         <div class="mle-ci-layer-card__head">
@@ -25016,7 +25131,7 @@ function mylottoexpertLoadBatchRunsForReview($db, $batchId, $userId, $lotteryId)
     if (empty($runCols)) {
         return array();
     }
-    $selectCols = array('id', 'batch_id', 'user_id', 'lottery_id', 'run_order', 'run_name', 'is_control', 'source', 'method', 'test_variable', 'test_value', 'status', 'full_settings_json', 'settings_json');
+    $selectCols = array('id', 'batch_id', 'user_id', 'lottery_id', 'run_order', 'run_name', 'is_control', 'source', 'method', 'test_variable', 'test_value', 'status', 'full_settings_json', 'settings_json', 'target_draw_date', 'target_draw_timezone', 'created_at', 'generated_at', 'generated_prediction_id', 'error_message');
     $select = array();
     foreach ($selectCols as $col) {
         if (in_array($col, $runCols, true)) {
@@ -25069,6 +25184,7 @@ function mylottoexpertCountGeneratedPrecisionBatchSaves($db, $userId, $lotteryId
     if ($userId <= 0 || $lotteryId <= 0 || $batchId <= 0) {
         return $out;
     }
+
     $prefix = $db->getPrefix();
     if (!mylottoexpertTableExistsByRawName($db, $prefix . 'user_saved_numbers')) {
         return $out;
@@ -25181,6 +25297,281 @@ function mylottoexpertCountGeneratedPrecisionBatchSaves($db, $userId, $lotteryId
     }
 
     return $out;
+}
+
+if (!function_exists('mylottoexpertBatchRecoveryFindSettingValue')) {
+    function mylottoexpertBatchRecoveryFindSettingValue($settings, array $keys)
+    {
+        if (!is_array($settings) || empty($settings) || empty($keys)) {
+            return '';
+        }
+        $queue = array($settings);
+        $seen = 0;
+        while (!empty($queue) && $seen < 250) {
+            $current = array_shift($queue);
+            $seen++;
+            if (!is_array($current) || empty($current)) {
+                continue;
+            }
+            foreach ($keys as $key) {
+                if (!array_key_exists($key, $current)) {
+                    continue;
+                }
+                $value = $current[$key];
+                if (is_array($value) || is_object($value)) {
+                    continue;
+                }
+                $value = trim((string)$value);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+            foreach ($current as $child) {
+                if (is_array($child) && !empty($child)) {
+                    $queue[] = $child;
+                }
+            }
+        }
+        return '';
+    }
+}
+
+if (!function_exists('mylottoexpertBatchRecoveryResolveRunMeta')) {
+    function mylottoexpertBatchRecoveryResolveRunMeta(array $runs, array $lotteryMeta = array())
+    {
+        $out = array(
+            'target_draw_date' => '',
+            'target_draw_timezone' => '',
+            'target_game_id' => '',
+        );
+        foreach ($runs as $run) {
+            $settings = is_array($run['_settings'] ?? null) ? (array)$run['_settings'] : array();
+            if ($out['target_draw_date'] === '') {
+                $dateCandidate = trim((string)($run['target_draw_date'] ?? ''));
+                if ($dateCandidate === '') {
+                    $dateCandidate = mylottoexpertBatchRecoveryFindSettingValue($settings, array('target_draw_date', 'next_draw_date', 'draw_date'));
+                }
+                if ($dateCandidate !== '' && preg_match('/^(\d{4}-\d{2}-\d{2})/', $dateCandidate, $m)) {
+                    $out['target_draw_date'] = $m[1];
+                }
+            }
+            if ($out['target_draw_timezone'] === '') {
+                $tzCandidate = trim((string)($run['target_draw_timezone'] ?? ''));
+                if ($tzCandidate === '') {
+                    $tzCandidate = mylottoexpertBatchRecoveryFindSettingValue($settings, array('target_draw_timezone', 'target_timezone_id', 'timezone_id', 'draw_timezone', 'timezone'));
+                }
+                $tzCandidate = preg_replace('/[^A-Za-z0-9_\/-]/', '', (string)$tzCandidate);
+                if ($tzCandidate !== '') {
+                    $out['target_draw_timezone'] = substr((string)$tzCandidate, 0, 64);
+                }
+            }
+            if ($out['target_game_id'] === '') {
+                $gameCandidate = mylottoexpertBatchRecoveryFindSettingValue($settings, array('target_game_id', 'game_id', 'gameId', 'gid'));
+                $gameCandidate = preg_replace('/[^A-Za-z0-9_.-]/', '', substr((string)$gameCandidate, 0, 50));
+                if ($gameCandidate !== '') {
+                    if (function_exists('mleAdvisoryIsPlausibleSkaiGameId')) {
+                        if (mleAdvisoryIsPlausibleSkaiGameId($gameCandidate)) {
+                            $out['target_game_id'] = $gameCandidate;
+                        }
+                    } elseif (preg_match('/^[A-Za-z0-9_.-]{1,50}$/', $gameCandidate)) {
+                        $out['target_game_id'] = $gameCandidate;
+                    }
+                }
+            }
+            if ($out['target_draw_date'] !== '' && $out['target_draw_timezone'] !== '' && $out['target_game_id'] !== '') {
+                break;
+            }
+        }
+        if ($out['target_game_id'] === '') {
+            $fallbackGameId = preg_replace('/[^A-Za-z0-9_.-]/', '', substr((string)($lotteryMeta['game_id'] ?? ''), 0, 50));
+            if ($fallbackGameId !== '') {
+                $out['target_game_id'] = $fallbackGameId;
+            }
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('mylottoexpertBatchRecoveryBuildSkaiOpenUrl')) {
+    function mylottoexpertBatchRecoveryBuildSkaiOpenUrl($db, array $header, array $runs, array $lotteryMeta = array())
+    {
+        $batchId = (int)($header['id'] ?? 0);
+        $lotteryId = (int)($header['lottery_id'] ?? 0);
+        if ($batchId <= 0 || $lotteryId <= 0 || !function_exists('mleAdvisoryBuildCanonicalSkaiLotteryUrl')) {
+            return '';
+        }
+        $meta = mylottoexpertBatchRecoveryResolveRunMeta($runs, $lotteryMeta);
+        $gameId = trim((string)($meta['target_game_id'] ?? ''));
+        if ($gameId === '' && function_exists('mleAdvisoryResolveSkaiLotteryUrlMeta')) {
+            $skaiMeta = mleAdvisoryResolveSkaiLotteryUrlMeta($db, $lotteryId);
+            $gameId = trim((string)($skaiMeta['gameId'] ?? ''));
+        }
+        if ($gameId === '') {
+            return '';
+        }
+        $batchType = trim((string)($header['batch_type'] ?? ''));
+        $isRegularBatch = ($batchType !== '' && stripos($batchType, 'regular') !== false);
+        $extraArgs = array(
+            'game_id' => $gameId,
+            'gameId' => $gameId,
+            'lottery_id' => $lotteryId,
+            'mle_skai_batch' => 1,
+            'mle_skai_bridge' => 1,
+            'mle_global_batch' => 1,
+            'mle_batch_scope' => 'exact_lottery',
+            'mle_guided_mode' => 'required',
+            'mle_required_action' => $isRegularBatch ? 'regular_9_batch' : 'precision_batch',
+            'mle_command_source' => 'mylottoexpert_admin',
+            'source' => 'mylottoexpert_admin',
+            'batch_id' => $batchId,
+            'open' => $isRegularBatch ? 'regular_9_batch' : 'precision_batch',
+        );
+        if (!$isRegularBatch) {
+            $extraArgs['mle_precision_batch'] = 1;
+        }
+        if ($batchType !== '') {
+            $extraArgs['mle_batch_type'] = strtolower(preg_replace('/[^a-z0-9]+/i', '_', $batchType));
+        }
+        return (string)mleAdvisoryBuildCanonicalSkaiLotteryUrl($db, $lotteryId, $extraArgs);
+    }
+}
+
+if (!function_exists('mylottoexpertLoadAdminBatchRecoveryRows')) {
+    function mylottoexpertLoadAdminBatchRecoveryRows($db, $limit = 60)
+    {
+        $limit = max(10, min(120, (int)$limit));
+        $out = array(
+            'available' => false,
+            'warnings' => array(),
+            'items' => array(),
+            'totals' => array(
+                'shown' => 0,
+                'ready' => 0,
+                'partial' => 0,
+                'failed' => 0,
+                'missing_skai_url' => 0,
+            ),
+        );
+        $prefix = $db->getPrefix();
+        $headerRawTable = $prefix . 'mle_skai_batch_header';
+        $runRawTable = $prefix . 'mle_skai_batch_run';
+        if (!mylottoexpertTableExistsByRawName($db, $headerRawTable) || !mylottoexpertTableExistsByRawName($db, $runRawTable)) {
+            $out['warnings'][] = 'Batch tables are not available.';
+            return $out;
+        }
+        $headerCols = mylottoexpertGetTableColumnNames($db, '#__mle_skai_batch_header');
+        if (empty($headerCols)) {
+            $out['warnings'][] = 'Batch header columns could not be read.';
+            return $out;
+        }
+        $out['available'] = true;
+        $select = array();
+        foreach (array('id', 'user_id', 'lottery_id', 'lottery_name', 'batch_type', 'status', 'created_at') as $col) {
+            if (in_array($col, $headerCols, true)) {
+                $select[] = 'h.' . $db->quoteName($col);
+            }
+        }
+        $lotteryJoin = false;
+        $lotteryCols = array();
+        if (mylottoexpertTableExistsByRawName($db, $prefix . 'lotteries')) {
+            $lotteryCols = mylottoexpertGetTableColumnNames($db, '#__lotteries');
+            if (!empty($lotteryCols)) {
+                $lotteryJoin = true;
+                if (in_array('name', $lotteryCols, true)) {
+                    $select[] = 'l.' . $db->quoteName('name') . ' AS ' . $db->quoteName('_lottery_name');
+                }
+                if (in_array('game_id', $lotteryCols, true)) {
+                    $select[] = 'l.' . $db->quoteName('game_id') . ' AS ' . $db->quoteName('_lottery_game_id');
+                }
+            }
+        }
+        if (empty($select)) {
+            $out['warnings'][] = 'No readable batch recovery columns were found.';
+            return $out;
+        }
+        try {
+            $q = $db->getQuery(true)
+                ->select($select)
+                ->from($db->quoteName('#__mle_skai_batch_header', 'h'));
+            if ($lotteryJoin) {
+                $q->join('LEFT', $db->quoteName('#__lotteries', 'l') . ' ON l.' . $db->quoteName('lottery_id') . ' = h.' . $db->quoteName('lottery_id'));
+            }
+            if (in_array('status', $headerCols, true)) {
+                $q->where('(h.' . $db->quoteName('status') . ' IS NULL OR h.' . $db->quoteName('status') . ' NOT IN (' . $db->quote('completed') . ',' . $db->quote('scored') . '))');
+            }
+            if (in_array('created_at', $headerCols, true)) {
+                $q->order('h.' . $db->quoteName('created_at') . ' DESC');
+            } else {
+                $q->order('h.' . $db->quoteName('id') . ' DESC');
+            }
+            $db->setQuery($q, 0, max(30, min(240, $limit * 4)));
+            $headers = $db->loadAssocList();
+        } catch (\Throwable $e) {
+            $headers = array();
+            $out['warnings'][] = 'Batch recovery rows could not be loaded.';
+        }
+        foreach ((array)$headers as $header) {
+            $batchId = (int)($header['id'] ?? 0);
+            $userId = (int)($header['user_id'] ?? 0);
+            $lotteryId = (int)($header['lottery_id'] ?? 0);
+            if ($batchId <= 0 || $userId <= 0 || $lotteryId <= 0) {
+                continue;
+            }
+            $runs = mylottoexpertLoadBatchRunsForReview($db, $batchId, $userId, $lotteryId);
+            $header['run_row_count'] = count($runs);
+            $header = mylottoexpertReconcilePrecisionBatchStatus($db, $userId, $lotteryId, $header, $runs);
+            $status = strtolower(trim((string)($header['_computed_status'] ?? ($header['status'] ?? 'pending'))));
+            $pendingByStatus = 0;
+            foreach ($runs as $run) {
+                $runStatus = strtolower(trim((string)($run['status'] ?? 'pending')));
+                if (!in_array($runStatus, array('generated', 'completed', 'saved', 'scored'), true)) {
+                    $pendingByStatus++;
+                }
+            }
+            $lotteryMeta = array(
+                'game_id' => (string)($header['_lottery_game_id'] ?? ''),
+                'lottery_name' => (string)($header['_lottery_name'] ?? ($header['lottery_name'] ?? '')),
+            );
+            $runMeta = mylottoexpertBatchRecoveryResolveRunMeta($runs, $lotteryMeta);
+            if ((string)($runMeta['target_game_id'] ?? '') === '' && function_exists('mleAdvisoryResolveSkaiLotteryUrlMeta')) {
+                $skaiMeta = mleAdvisoryResolveSkaiLotteryUrlMeta($db, $lotteryId);
+                $runMeta['target_game_id'] = (string)($skaiMeta['gameId'] ?? '');
+            }
+            $header['lottery_name'] = trim((string)($header['lottery_name'] ?? '')) !== '' ? (string)$header['lottery_name'] : (trim((string)($header['_lottery_name'] ?? '')) !== '' ? (string)$header['_lottery_name'] : ('Lottery #' . $lotteryId));
+            $header['generated_run_count'] = (int)($header['_effective_generated_count'] ?? 0);
+            $header['pending_run_count'] = max(0, max($pendingByStatus, $header['run_row_count'] - min($header['generated_run_count'], $header['run_row_count'])));
+            $header['saved_row_count'] = (int)($header['_saved_count'] ?? 0);
+            $header['target_draw_date'] = (string)($runMeta['target_draw_date'] ?? '');
+            $header['target_draw_timezone'] = (string)($runMeta['target_draw_timezone'] ?? '');
+            $header['target_game_id'] = (string)($runMeta['target_game_id'] ?? '');
+            $header['open_skai_url'] = mylottoexpertBatchRecoveryBuildSkaiOpenUrl($db, $header, $runs, $lotteryMeta);
+            $needsAttention = !empty($header['_is_not_started'])
+                || !empty($header['_is_in_progress'])
+                || $status === 'failed'
+                || (int)$header['run_row_count'] !== 9
+                || (int)$header['saved_row_count'] < (int)$header['generated_run_count']
+                || $header['open_skai_url'] === '';
+            if (!$needsAttention) {
+                continue;
+            }
+            $out['items'][] = $header;
+            if ($status === 'failed') {
+                $out['totals']['failed']++;
+            } elseif (!empty($header['_is_in_progress'])) {
+                $out['totals']['partial']++;
+            } else {
+                $out['totals']['ready']++;
+            }
+            if ($header['open_skai_url'] === '') {
+                $out['totals']['missing_skai_url']++;
+            }
+            if (count($out['items']) >= $limit) {
+                break;
+            }
+        }
+        $out['totals']['shown'] = count($out['items']);
+        return $out;
+    }
 }
 
 function mylottoexpertReconcilePrecisionBatchStatus($db, $userId, $lotteryId, array $header, array $runs)
