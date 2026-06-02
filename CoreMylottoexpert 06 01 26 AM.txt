@@ -24132,6 +24132,12 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
                     $where[] = '(' . $qn($statusCol) . ' IS NULL OR TRIM(' . $qn($statusCol) . ') = ' . $db->quote('') . ' OR LOWER(TRIM(' . $qn($statusCol) . ')) NOT IN (' . implode(',', $quoted) . '))';
                 }
             }
+            if ($requireIdentity && $hasCol('evaluation_status')) {
+                $where[] = "(LOWER(TRIM(COALESCE(" . $qn('evaluation_status') . ",''))) = 'pending')";
+            }
+            if ($requireIdentity && $hasCol('play_status')) {
+                $where[] = "(LOWER(TRIM(COALESCE(" . $qn('play_status') . ",''))) = 'draft')";
+            }
             if ($hasCol('evaluated_at')) {
                 $where[] = '(' . $qn('evaluated_at') . ' IS NULL OR ' . $qn('evaluated_at') . ' = ' . $db->quote('0000-00-00 00:00:00') . ')';
             }
@@ -24145,7 +24151,8 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
             $upcomingDate = trim((string)($upcoming['date'] ?? ''));
             if ($upcomingDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $upcomingDate)) { return 0; }
             $drawParts = array();
-            foreach (array('target_draw_date','next_draw_date','latest_draw_date','draw_date') as $drawCol) {
+            $drawCols = $requireIdentity ? array('target_draw_date','next_draw_date','latest_draw_date') : array('target_draw_date','next_draw_date','latest_draw_date','draw_date');
+            foreach ($drawCols as $drawCol) {
                 if ($hasCol($drawCol)) { $drawParts[] = 'NULLIF(' . $qn($drawCol) . ', ' . $db->quote('0000-00-00') . ')'; }
             }
             $drawExpr = !empty($drawParts) ? 'COALESCE(' . implode(',', $drawParts) . ')' : 'NULL';
@@ -24167,6 +24174,14 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
                         . " AND LOWER(TRIM(COALESCE(" . $qn('save_intent') . ",''))) NOT LIKE 'system%'"
                         . ')';
                 }
+                $placeholderKinds = array('batch_header','research_queue','research_assignment','recommendation_only','needs_run_placeholder');
+                foreach (array('source','origin_source','save_intent','status','play_status') as $kindCol) {
+                    if ($hasCol($kindCol)) {
+                        $kindQuoted = array();
+                        foreach ($placeholderKinds as $kind) { $kindQuoted[] = $db->quote($kind); }
+                        $where[] = '(LOWER(TRIM(COALESCE(' . $qn($kindCol) . ",''))) NOT IN (" . implode(',', $kindQuoted) . '))';
+                    }
+                }
                 /* Require at least one saved-run identity marker so that bucket-summary
                    or advisory-aggregate rows without real run identity are excluded. */
                 $identityParts = array();
@@ -24178,11 +24193,27 @@ if (!function_exists('mylottoexpertDatabasePendingRunCount')) {
                 if ($hasCol('prediction_target_key')){ $identityParts[] = "(TRIM(COALESCE(" . $qn('prediction_target_key'). ",'')) <> '')"; }
                 if (!empty($identityParts)) {
                     $where[] = '(' . implode(' OR ', $identityParts) . ')';
+                } else {
+                    return 0;
                 }
             }
 
-            $idExpr = $hasCol('id') ? 'COUNT(DISTINCT ' . $qn('id') . ')' : 'COUNT(*)';
-            $query = 'SELECT ' . $idExpr . ' FROM ' . $db->quoteName($table) . ' WHERE ' . implode(' AND ', $where);
+            if ($requireIdentity) {
+                $identityGroupParts = array();
+                if ($hasCol('run_uuid'))             { $identityGroupParts[] = "NULLIF(CONCAT('run:',TRIM(COALESCE(" . $qn('run_uuid') . ",''))),'run:')"; }
+                if ($hasCol('batch_uuid'))           { $identityGroupParts[] = "NULLIF(CONCAT('batch:',TRIM(COALESCE(" . $qn('batch_uuid') . ",''))),'batch:')"; }
+                if ($hasCol('source_batch_run_id'))  { $identityGroupParts[] = "CASE WHEN COALESCE(" . $qn('source_batch_run_id') . ",0) > 0 THEN CONCAT('sbr:',COALESCE(" . $qn('source_batch_run_id') . ",0)) ELSE NULL END"; }
+                if ($hasCol('source_batch_id'))      { $identityGroupParts[] = "CASE WHEN COALESCE(" . $qn('source_batch_id') . ",0) > 0 THEN CONCAT('sb:',COALESCE(" . $qn('source_batch_id') . ",0)) ELSE NULL END"; }
+                if ($hasCol('prediction_target_id')) { $identityGroupParts[] = "NULLIF(CONCAT('ptid:',TRIM(COALESCE(" . $qn('prediction_target_id') . ",''))),'ptid:')"; }
+                if ($hasCol('prediction_target_key')){ $identityGroupParts[] = "NULLIF(CONCAT('ptk:',TRIM(COALESCE(" . $qn('prediction_target_key') . ",''))),'ptk:')"; }
+                if ($hasCol('id'))                   { $identityGroupParts[] = "CONCAT('id:'," . $qn('id') . ')'; }
+                if (empty($identityGroupParts)) { return 0; }
+                $groupExpr = 'COALESCE(' . implode(', ', $identityGroupParts) . ')';
+                $query = 'SELECT COUNT(*) FROM (SELECT ' . $groupExpr . ' AS ' . $qn('run_identity') . ' FROM ' . $db->quoteName($table) . ' WHERE ' . implode(' AND ', $where) . ' GROUP BY ' . $qn('run_identity') . ') AS ' . $qn('mle_pending_groups');
+            } else {
+                $idExpr = $hasCol('id') ? 'COUNT(DISTINCT ' . $qn('id') . ')' : 'COUNT(*)';
+                $query = 'SELECT ' . $idExpr . ' FROM ' . $db->quoteName($table) . ' WHERE ' . implode(' AND ', $where);
+            }
             $db->setQuery($query);
             $count = (int)$db->loadResult();
             if ($__mleIdentityDiagEnabled && !empty($GLOBALS['__mle_pending_identity_diag'])) {
