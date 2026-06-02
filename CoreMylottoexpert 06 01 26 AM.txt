@@ -24297,6 +24297,107 @@ if (!function_exists('mylottoexpertSyncCardPendingCount')) {
     }
 }
 
+if (!function_exists('mylottoexpertStrictPendingGroupedRows')) {
+    function mylottoexpertStrictPendingGroupedRows($db, $userId, array $visibleLotteryIds = array())
+    {
+        $userId = (int)$userId;
+        if (!is_object($db) || $userId <= 0) { return array(); }
+        try {
+            $table = '#__user_saved_numbers';
+            $colsRaw = $db->getTableColumns($table, false);
+            $cols = array();
+            foreach ((array)$colsRaw as $ck => $cv) {
+                if (is_string($ck) && $ck !== '') { $cols[$ck] = true; }
+                elseif (is_object($cv) && isset($cv->Field)) { $cols[(string)$cv->Field] = true; }
+            }
+            if (empty($cols) || empty($cols['user_id'])) { return array(); }
+            $hasCol = function($name) use ($cols) { return isset($cols[(string)$name]); };
+            $qn = function($name) use ($db) { return $db->quoteName((string)$name); };
+            $qc = function($alias, $name) use ($db) { return (string)$alias . '.' . $db->quoteName((string)$name); };
+
+            $visibleLotteryIds = array_values(array_unique(array_filter(array_map('intval', (array)$visibleLotteryIds), static function($v){ return $v > 0; })));
+            if (empty($visibleLotteryIds)) { return array(); }
+
+            $effectiveLotteryExprFor = function($alias) use ($hasCol, $qc) {
+                $parts = array();
+                if ($hasCol('target_lottery_id')) { $parts[] = 'NULLIF(' . $qc($alias, 'target_lottery_id') . ',0)'; }
+                if ($hasCol('lottery_id')) { $parts[] = 'NULLIF(' . $qc($alias, 'lottery_id') . ',0)'; }
+                if (empty($parts)) { return '0'; }
+                return 'COALESCE(' . implode(', ', $parts) . ', 0)';
+            };
+            $effectiveGameExprFor = function($alias) use ($hasCol, $qc) {
+                $parts = array();
+                if ($hasCol('target_game_id')) { $parts[] = "NULLIF(TRIM(COALESCE(" . $qc($alias, 'target_game_id') . ",'')),'')"; }
+                if ($hasCol('game_id')) { $parts[] = "NULLIF(TRIM(COALESCE(" . $qc($alias, 'game_id') . ",'')),'')"; }
+                if (empty($parts)) { return "''"; }
+                return 'LOWER(TRIM(COALESCE(' . implode(', ', $parts) . ", '')))";
+            };
+            if (!$hasCol('target_draw_date')) { return array(); }
+
+            $buildBaseWhere = function($alias) use ($userId, $visibleLotteryIds, $hasCol, $db, $qc, $effectiveLotteryExprFor) {
+                $where = array();
+                $where[] = $qc($alias, 'user_id') . ' = ' . $userId;
+                $where[] = '(' . $effectiveLotteryExprFor($alias) . ' IN (' . implode(',', array_map('intval', $visibleLotteryIds)) . '))';
+                if ($hasCol('target_lottery_id')) { $where[] = '(COALESCE(' . $qc($alias, 'target_lottery_id') . ',0) > 0)'; }
+                if ($hasCol('evaluation_status')) { $where[] = "(LOWER(TRIM(COALESCE(" . $qc($alias, 'evaluation_status') . ",''))) = 'pending')"; }
+                if ($hasCol('play_status')) { $where[] = "(LOWER(TRIM(COALESCE(" . $qc($alias, 'play_status') . ",''))) = 'draft')"; }
+                if ($hasCol('source')) { $where[] = "(LOWER(TRIM(COALESCE(" . $qc($alias, 'source') . ",''))) = 'skai_prediction')"; }
+                if ($hasCol('target_draw_date')) {
+                    $where[] = '(' . $qc($alias, 'target_draw_date') . ' IS NOT NULL)';
+                    $where[] = "(TRIM(COALESCE(" . $qc($alias, 'target_draw_date') . ",'')) <> '')";
+                    $where[] = '(' . $qc($alias, 'target_draw_date') . " <> '0000-00-00')";
+                }
+                if ($hasCol('evaluated_at')) {
+                    $where[] = '(' . $qc($alias, 'evaluated_at') . ' IS NULL OR TRIM(' . $qc($alias, 'evaluated_at') . ") = '' OR " . $qc($alias, 'evaluated_at') . " = '0000-00-00 00:00:00')";
+                }
+                if ($hasCol('actual_draw_date')) {
+                    $where[] = '(' . $qc($alias, 'actual_draw_date') . ' IS NULL OR TRIM(' . $qc($alias, 'actual_draw_date') . ") = '' OR " . $qc($alias, 'actual_draw_date') . " = '0000-00-00')";
+                }
+                foreach (array('actual_main_numbers','actual_extra_numbers') as $actualCol) {
+                    if ($hasCol($actualCol)) {
+                        $where[] = '(' . $qc($alias, $actualCol) . ' IS NULL OR TRIM(' . $qc($alias, $actualCol) . ") = '')";
+                    }
+                }
+                $identity = array();
+                if ($hasCol('source_batch_id')) { $identity[] = '(COALESCE(' . $qc($alias, 'source_batch_id') . ',0) > 0)'; }
+                if ($hasCol('source_batch_run_id')) { $identity[] = '(COALESCE(' . $qc($alias, 'source_batch_run_id') . ',0) > 0)'; }
+                if ($hasCol('run_uuid')) { $identity[] = "(TRIM(COALESCE(" . $qc($alias, 'run_uuid') . ",'')) <> '')"; }
+                if (empty($identity)) { return array(); }
+                $where[] = '(' . implode(' OR ', $identity) . ')';
+                return $where;
+            };
+
+            $baseWhereP = $buildBaseWhere('p');
+            $baseWhereP2 = $buildBaseWhere('p2');
+            if (empty($baseWhereP) || empty($baseWhereP2)) { return array(); }
+            $effectiveLotteryP = $effectiveLotteryExprFor('p');
+            $effectiveLotteryP2 = $effectiveLotteryExprFor('p2');
+            $effectiveGameP = $effectiveGameExprFor('p');
+            $sourceBatchExpr = $hasCol('source_batch_id') ? ('COALESCE(p.' . $qn('source_batch_id') . ',0)') : '0';
+            $currentDrawSubquery = '(SELECT MAX(DATE(p2.' . $qn('target_draw_date') . ')) FROM ' . $db->quoteName($table) . ' AS p2'
+                . ' WHERE ' . implode(' AND ', $baseWhereP2)
+                . ' AND ' . $effectiveLotteryP2 . ' = ' . $effectiveLotteryP . ')';
+
+            $query = 'SELECT '
+                . $effectiveLotteryP . ' AS ' . $qn('effective_lottery_id') . ', '
+                . $effectiveGameP . ' AS ' . $qn('effective_game_id') . ', '
+                . 'DATE(p.' . $qn('target_draw_date') . ') AS ' . $qn('target_draw_date') . ', '
+                . $sourceBatchExpr . ' AS ' . $qn('source_batch_id') . ', '
+                . 'COUNT(*) AS ' . $qn('row_count')
+                . ' FROM ' . $db->quoteName($table) . ' AS p'
+                . ' WHERE ' . implode(' AND ', $baseWhereP)
+                . ' AND DATE(p.' . $qn('target_draw_date') . ') = ' . $currentDrawSubquery
+                . ' GROUP BY ' . $qn('effective_lottery_id') . ', ' . $qn('effective_game_id') . ', ' . $qn('target_draw_date') . ', ' . $qn('source_batch_id')
+                . ' ORDER BY ' . $qn('effective_lottery_id') . ' ASC, ' . $qn('target_draw_date') . ' ASC, ' . $qn('source_batch_id') . ' ASC';
+            $db->setQuery($query);
+            $rows = $db->loadAssocList();
+            return is_array($rows) ? $rows : array();
+        } catch (\Throwable $e) {
+            return array();
+        }
+    }
+}
+
 if (!function_exists('mylottoexpertBriefDrawCyclePercent')) {
     function mylottoexpertBriefDrawCyclePercent($cycles, $target = 20)
     {
@@ -29351,68 +29452,60 @@ if (!empty($__mleAdvCards)) {
     }
     unset($__mleBriefFullCard, $__mleBriefFullLid, $__mleBriefDidReplace, $__mleBriefSrcIdx, $__mleBriefSrcCard);
 }
-/* [[MLE_V5_STRICT_PENDING_MAP_2026_06_01]]
-   Build a strict DB-only pending map keyed by lottery_id for all visible top
-   cards. This map is the authoritative source for both per-card pending counts
-   and the global $__mleBriefTotals['pending'] total.
+/* [[MLE_V5_STRICT_PENDING_MAP_GROUPED_2026_06_02]]
+   Build strict top pending counts directly from a grouped DB query over
+   #__user_saved_numbers, independent of selector-card pending summaries,
+   visual rows, or batch header status.
 
-   Rules enforced:
-   - Source is #__user_saved_numbers (real saved runs only).
-   - Requires a valid upcoming draw date for the lottery; 0 pending otherwise.
-   - Does NOT fall back to selector prediction_summary.pending_runs.
-   - Passes $requireIdentity = true: each counted row must carry at least one
-     of run_uuid, batch_uuid, source_batch_id, source_batch_run_id,
-     prediction_target_id, or prediction_target_key. This prevents false
-     pending counts from bucket-summary or advisory-aggregate rows.
-   - strategy_set source rows are excluded.
-   - When the DB query returns null (connection unavailable), pending is 0. */
+   Grouped query output includes:
+   - effective_lottery_id
+   - effective_game_id
+   - target_draw_date
+   - source_batch_id
+   - row_count
+
+   Pending filters are strict:
+   - user_id = workspace user id
+   - evaluation_status = pending
+   - play_status = draft
+   - source = skai_prediction
+   - target_draw_date is required
+   - evaluated_at is null/empty
+   - actual_draw_date, actual_main_numbers, actual_extra_numbers are empty
+   - identity requires source_batch_id > 0 OR source_batch_run_id > 0 OR run_uuid set
+   - target_lottery_id must be present when column exists
+   - count only the current pending draw date (latest target_draw_date) per lottery. */
 $__mleStrictPendingByLotteryId = array();
 $__mleStrictPendingScopeByLotteryId = array();
-$__mleStrictPendingFullByLotteryId = array();
-foreach ((array)$__mleAdvCards as $__mlePendingFullCardRaw) {
-    $__mlePendingFullLid = (int)($__mlePendingFullCardRaw['lottery_id'] ?? 0);
-    if ($__mlePendingFullLid <= 0) { continue; }
-    $__mleStrictPendingFullByLotteryId[$__mlePendingFullLid] = (array)$__mlePendingFullCardRaw;
-}
+$__mleStrictPendingGroupedRows = array();
+$__mleStrictPendingVisibleLotteryIds = array();
 foreach ((array)$__mleBriefSourceCards as $__mlePendingCardRaw) {
     $__mlePendingLid = (int)($__mlePendingCardRaw['lottery_id'] ?? 0);
     if ($__mlePendingLid <= 0) { continue; }
-    $__mlePendingScopeCard = (array)$__mlePendingCardRaw;
-    if (empty($__mlePendingScopeCard['game_id']) && !empty($__mleStrictPendingFullByLotteryId[$__mlePendingLid]['game_id'])) {
-        $__mlePendingScopeCard['game_id'] = (string)$__mleStrictPendingFullByLotteryId[$__mlePendingLid]['game_id'];
+    $__mleStrictPendingVisibleLotteryIds[$__mlePendingLid] = $__mlePendingLid;
+    $__mleStrictPendingByLotteryId[$__mlePendingLid] = 0;
+}
+if (is_object($db) && (int)$workspaceUserId > 0 && !empty($__mleStrictPendingVisibleLotteryIds)) {
+    $__mleStrictPendingGroupedRows = mylottoexpertStrictPendingGroupedRows($db, $workspaceUserId, array_values($__mleStrictPendingVisibleLotteryIds));
+}
+foreach ((array)$__mleStrictPendingGroupedRows as $__mleStrictPendingGroupRow) {
+    $__mleStrictPendingGroupLid = (int)($__mleStrictPendingGroupRow['effective_lottery_id'] ?? 0);
+    if ($__mleStrictPendingGroupLid <= 0) { continue; }
+    $__mleStrictPendingGroupRows = max(0, (int)($__mleStrictPendingGroupRow['row_count'] ?? 0));
+    if (!isset($__mleStrictPendingByLotteryId[$__mleStrictPendingGroupLid])) {
+        $__mleStrictPendingByLotteryId[$__mleStrictPendingGroupLid] = 0;
     }
-    $____mlePendingScope = mylottoexpertResolveUpcomingDrawScope($__mlePendingScopeCard);
-    if (trim((string)($____mlePendingScope['date'] ?? '')) === '' && !empty($__mleStrictPendingFullByLotteryId[$__mlePendingLid])) {
-        $____mlePendingScope = mylottoexpertResolveUpcomingDrawScope((array)$__mleStrictPendingFullByLotteryId[$__mlePendingLid]);
-    }
-    $__mlePendingDate = trim((string)($____mlePendingScope['date'] ?? ''));
-    if ($__mlePendingDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $__mlePendingDate)) {
-        /* No valid upcoming draw date resolved: strict pending is 0.
-           Do not fall back to prediction_summary.pending_runs from the selector
-           card because that value is produced by mleAdvisorySummarizeActive-
-           LotteryBucket() without a saved-run identity requirement and can
-           produce false 1-pending counts. */
-        $__mleStrictPendingByLotteryId[$__mlePendingLid] = 0;
-        continue;
-    }
-    $__mlePendingDrawAt = trim((string)($____mlePendingScope['draw_at'] ?? ''));
-    $__mlePendingScopeCard['next_draw_date'] = $__mlePendingDate;
-    $__mlePendingScopeCard['target_draw_date'] = $__mlePendingDate;
-    if ($__mlePendingDrawAt !== '' && strncmp($__mlePendingDrawAt, '0000-00-00', 10) !== 0) {
-        $__mlePendingScopeCard['next_draw_at'] = $__mlePendingDrawAt;
-        $__mlePendingScopeCard['target_draw_at'] = $__mlePendingDrawAt;
-    }
-    $__mlePendingCount = 0;
-    if (is_object($db) && (int)$workspaceUserId > 0) {
-        $__mlePendingDbResult = mylottoexpertDatabasePendingRunCount($db, $workspaceUserId, $__mlePendingScopeCard, true);
-        if ($__mlePendingDbResult !== null) {
-            $__mlePendingCount = (int)$__mlePendingDbResult;
+    $__mleStrictPendingByLotteryId[$__mleStrictPendingGroupLid] += $__mleStrictPendingGroupRows;
+    $__mleStrictPendingGroupDate = trim((string)($__mleStrictPendingGroupRow['target_draw_date'] ?? ''));
+    if ($__mleStrictPendingGroupDate !== '') {
+        if (!isset($__mleStrictPendingScopeByLotteryId[$__mleStrictPendingGroupLid]) || trim((string)($__mleStrictPendingScopeByLotteryId[$__mleStrictPendingGroupLid]['date'] ?? '')) === '') {
+            $__mleStrictPendingScopeByLotteryId[$__mleStrictPendingGroupLid] = array('date'=>$__mleStrictPendingGroupDate, 'draw_at'=>'');
+        } else {
+            $__mleStrictPendingScopeByLotteryId[$__mleStrictPendingGroupLid]['date'] = $__mleStrictPendingGroupDate;
         }
     }
-    $__mleStrictPendingByLotteryId[$__mlePendingLid] = max(0, $__mlePendingCount);
-    $__mleStrictPendingScopeByLotteryId[$__mlePendingLid] = array('date'=>$__mlePendingDate, 'draw_at'=>$__mlePendingDrawAt);
 }
-unset($__mlePendingFullCardRaw, $__mlePendingFullLid, $__mlePendingCardRaw, $__mlePendingLid, $__mlePendingScopeCard, $____mlePendingScope, $__mlePendingDate, $__mlePendingDrawAt, $__mlePendingCount, $__mlePendingDbResult);
+unset($__mlePendingCardRaw, $__mlePendingLid, $__mleStrictPendingGroupRow, $__mleStrictPendingGroupLid, $__mleStrictPendingGroupRows, $__mleStrictPendingGroupDate, $__mleStrictPendingVisibleLotteryIds);
 foreach ((array)$__mleBriefSourceCards as $__briefCardRaw) {
     $__briefLid = (int)($__briefCardRaw['lottery_id'] ?? 0);
     if ($__briefLid <= 0) { continue; }
@@ -29559,7 +29652,7 @@ if ($__mleShowStrictPendingDiagnosticPanel) {
     unset($__mleStrictDbgLid, $__mleStrictDbgCount, $__mleStrictDbgScope, $__mleStrictDbgCard, $__mleStrictDbgTopDisplayed, $__mleStrictDbgName);
 }
 unset($__mleBriefSourceCards, $__briefCardRaw, $__briefLid, $__briefName, $__briefStats, $__briefSummary, $__briefVisual, $__briefProgress, $__briefBatch, $__briefSettings, $__briefTopMethod, $__briefMethodKey, $__briefMethodLabel, $__briefMethodRole, $__briefMethodTrack, $__briefPending, $__briefScored, $__briefDrawCycles, $__briefStageKey, $__briefStageLabel, $__briefStageRank, $__briefCleanName, $__briefType, $__briefLabel, $__briefDetail, $__briefPriority, $__briefActionTarget, $__briefActionPanel, $__briefActionCta, $__briefActionState, $__briefTargetKind, $__briefHasRecommendedAction);
-unset($__mleStrictPendingByLotteryId, $__mleStrictPendingScopeByLotteryId, $__mleStrictPendingFullByLotteryId);
+unset($__mleStrictPendingByLotteryId, $__mleStrictPendingScopeByLotteryId, $__mleStrictPendingGroupedRows);
 usort($__mleBriefCards, static function($a, $b) { return ((int)($b['priority'] ?? 0)) <=> ((int)($a['priority'] ?? 0)); });
 
 $__mleBriefTopCards = $__mleBriefCards;
