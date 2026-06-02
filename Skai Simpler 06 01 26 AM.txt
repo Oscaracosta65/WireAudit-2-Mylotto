@@ -16404,15 +16404,24 @@ $labelInput = implode(' - ', $parts);
             'target_draw_at_tz' => null,
         );
         $skaiSourceBatchRunId = (int)$in->getInt('source_batch_run_id', 0);
-        if ($skaiSourceBatchRunId > 0) {
+        $skaiSourceBatchIdForTarget = (int)$in->getInt('source_batch_id', 0);
+        $skaiSourceBatchRunOrderForTarget = (int)$in->getInt('source_batch_run_order', 0);
+        if ($skaiSourceBatchRunId > 0 || ($skaiSourceBatchIdForTarget > 0 && $skaiSourceBatchRunOrderForTarget > 0)) {
             try {
                 $skaiRunTables = array_map('strtolower', array_keys((array)$db->getTableList()));
                 $skaiRunTable  = strtolower(str_replace('#__', $db->getPrefix(), '#__mle_skai_batch_run'));
                 if (in_array($skaiRunTable, $skaiRunTables, true)) {
                     $skaiRunQ = $db->getQuery(true)
                         ->select($db->quoteName('full_settings_json'))
-                        ->from($db->quoteName('#__mle_skai_batch_run'))
-                        ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchRunId);
+                        ->from($db->quoteName('#__mle_skai_batch_run'));
+                    if ($skaiSourceBatchRunId > 0) {
+                        $skaiRunQ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchRunId);
+                    } else {
+                        $skaiRunQ
+                            ->where($db->quoteName('batch_id') . ' = ' . (int)$skaiSourceBatchIdForTarget)
+                            ->where($db->quoteName('run_order') . ' = ' . (int)$skaiSourceBatchRunOrderForTarget)
+                            ->order($db->quoteName('id') . ' DESC');
+                    }
                     $db->setQuery($skaiRunQ, 0, 1);
                     $skaiRunJson = (string)($db->loadResult() ?? '');
                     if ($skaiRunJson !== '') {
@@ -16466,6 +16475,8 @@ $labelInput = implode(' - ', $parts);
             $nextDrawDateSql = (string)$skaiBatchTargetDraw['target_draw_date'];
             if (!empty($skaiBatchTargetDraw['target_draw_at'])) {
                 $nextDrawAtSql = (string)$skaiBatchTargetDraw['target_draw_at'];
+            } else {
+                $nextDrawAtSql = null;
             }
             if (!empty($skaiBatchTargetDraw['target_draw_timezone'])) {
                 $drawTz = (string)$skaiBatchTargetDraw['target_draw_timezone'];
@@ -16528,10 +16539,10 @@ $labelInput = implode(' - ', $parts);
         }
 
         try {
-            if ($nextDrawAtSql === null && !empty($nda)) {
+            if (empty($skaiBatchTargetDraw['has_valid_target_draw_date']) && $nextDrawAtSql === null && !empty($nda)) {
                 // Full timestamp for next_draw_at (DATETIME column) - use lottery TZ
                 $nextDrawAtSql = (new Date($nda, $drawTz))->toSql();
-            } elseif ($nextDrawAtSql === null && !empty($lotteryConfig['next_draw_at'])) {
+            } elseif (empty($skaiBatchTargetDraw['has_valid_target_draw_date']) && $nextDrawAtSql === null && !empty($lotteryConfig['next_draw_at'])) {
                 $nextDrawAtSql = (new Date($lotteryConfig['next_draw_at'], $drawTz))->toSql();
             }
         } catch (\Throwable $e) { /* ignore; leave as NULL */ }
@@ -16932,12 +16943,22 @@ $__skaiDrawResolutionNote = !empty($skaiBatchTargetDraw['target_draw_resolution_
     ? (string)$skaiBatchTargetDraw['target_draw_resolution_note']
     : (isset($lotteryTz) && $lotteryTz !== '' ? 'resolved_from_lottery_config' : (isset($drawTz) ? 'resolved_from_draw_family_or_site_fallback' : 'unknown'));
 if (!empty($skaiBatchTargetDraw['has_valid_target_draw_date'])) {
+    $__skaiDrawSource = 'batch_json_preserved';
     if (strpos($__skaiDrawResolutionNote, 'preserved_from_batch_full_settings_json') === false) {
         $__skaiDrawResolutionNote = trim($__skaiDrawResolutionNote) !== ''
             ? ($__skaiDrawResolutionNote . ' | preserved_from_batch_full_settings_json')
             : 'preserved_from_batch_full_settings_json';
     }
 }
+$__skaiTargetDrawDateRow = !empty($skaiBatchTargetDraw['has_valid_target_draw_date'])
+    ? (string)$skaiBatchTargetDraw['target_draw_date']
+    : ($predictionTarget['target_draw_date'] ?? null);
+$__skaiTargetDrawAtRow = !empty($skaiBatchTargetDraw['has_valid_target_draw_date'])
+    ? (!empty($skaiBatchTargetDraw['target_draw_at']) ? (string)$skaiBatchTargetDraw['target_draw_at'] : null)
+    : ($predictionTarget['target_draw_at'] ?? null);
+$__skaiTargetDrawTimezoneRow = !empty($skaiBatchTargetDraw['target_draw_timezone'])
+    ? (string)$skaiBatchTargetDraw['target_draw_timezone']
+    : (isset($drawTz) ? $drawTz : ($predictionTarget['target_timezone_id'] ?? null));
 
 $row = (object) [
     'user_id'             => (int) $user->id,
@@ -16960,12 +16981,12 @@ $row = (object) [
     'prediction_target_json' => ($predictionTargetJson !== '' ? $predictionTargetJson : null),
     'target_game_id'      => ($predictionTarget['target_game_id'] ?? null),
     'target_lottery_id'   => ($predictionTarget['target_lottery_id'] ?? null),
-    'target_draw_date'    => ($predictionTarget['target_draw_date'] ?? null),
-    'target_draw_at'      => ($predictionTarget['target_draw_at'] ?? null),
+    'target_draw_date'    => $__skaiTargetDrawDateRow,
+    'target_draw_at'      => $__skaiTargetDrawAtRow,
     'target_draw_session' => ($predictionTarget['target_draw_session'] ?? null),
     'target_timezone_id'  => ($predictionTarget['target_timezone_id'] ?? null),
     // [[MLE_DRAW_TZ_FIX_2026]] Traceability fields - written to row when columns exist
-    'target_draw_timezone'        => !empty($skaiBatchTargetDraw['target_draw_timezone']) ? (string)$skaiBatchTargetDraw['target_draw_timezone'] : (isset($drawTz) ? $drawTz : ($predictionTarget['target_timezone_id'] ?? null)),
+    'target_draw_timezone'        => $__skaiTargetDrawTimezoneRow,
     'target_draw_at_tz'           => !empty($skaiBatchTargetDraw['target_draw_at_tz']) ? (string)$skaiBatchTargetDraw['target_draw_at_tz'] : null,
     'target_draw_label'           => ($__skaiDrawLabel !== '' ? $__skaiDrawLabel : null),
     'target_draw_source'          => ($__skaiDrawSource !== '' ? $__skaiDrawSource : null),
