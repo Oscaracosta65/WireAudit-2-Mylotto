@@ -7874,10 +7874,10 @@ function mleAdvisoryCardPrint(btn) {
       nextActionDescription = 'Batch creation is disabled in demo mode. Open SKAI preview only.';
       fallbackReason = 'demo_mode';
     } else if (canOpenRegularSkai) {
-      nextActionType = 'open_regular_skai';
-      nextActionLabel = 'Open SKAI Global-Learning 9-Batch';
-      nextActionDescription = 'Focus batch is not ready yet; open SKAI regular 9-batch.';
-      fallbackReason = 'focus_batch_not_ready';
+      nextActionType = 'unavailable';
+      nextActionLabel = 'Action Not Ready';
+      nextActionDescription = 'LottoExpert cannot open regular SKAI because the tracked 9-run batch form is missing for this lottery card.';
+      fallbackReason = 'missing_tracked_regular_batch_form';
     } else if (demoMode) {
       nextActionType = 'demo_read_only';
       nextActionLabel = 'Demo Mode - View Only';
@@ -7949,7 +7949,13 @@ function mleAdvisoryCardPrint(btn) {
     debugSnapshot(card,state,{requestSubmitCalled:false,fallbackReviewPendingCalled:false,fallbackReason:''});
     if (state.nextActionType === 'review_pending') { reviewPending(card); return; }
     if (state.nextActionType === 'review_results' || state.nextActionType === 'score_runs') { reviewPending(card); return; }
-    if (state.nextActionType === 'open_regular_skai' || state.nextActionType === 'demo_read_only' || state.nextActionType === 'demo_view_only') {
+    if (state.nextActionType === 'open_regular_skai') {
+      fallbackReason = 'missing_tracked_regular_batch_form';
+      showActionWarning(card,'The tracked 9-run batch form is missing. Please refresh and try again.');
+      debugSnapshot(card,state,{requestSubmitCalled:false,fallbackReviewPendingCalled:false,fallbackReason:fallbackReason});
+      return;
+    }
+    if (state.nextActionType === 'demo_read_only' || state.nextActionType === 'demo_view_only') {
       if (!openSkaiUrl(state.skaiRegularUrl)) {
         fallbackReason = 'missing_skai_url';
         showActionWarning(card,'LottoExpert cannot open SKAI because the lottery URL context is missing.');
@@ -7994,9 +8000,8 @@ function mleAdvisoryCardPrint(btn) {
       return;
     }
     if(b){ b.click(); debugSnapshot(card,state,{requestSubmitCalled:false,fallbackReviewPendingCalled:false,fallbackReason:''}); return; }
-    if(openSkaiUrl(state.skaiRegularUrl)){ debugSnapshot(card,state,{requestSubmitCalled:false,fallbackReviewPendingCalled:false,fallbackReason:'open_regular_skai_fallback'}); return; }
     fallbackReviewPendingCalled = true;
-    fallbackReason = 'no_submit_button_no_skai_url';
+    fallbackReason = 'missing_batch_submit_control';
     showActionWarning(card,'LottoExpert cannot create this batch because the submit control is missing.');
     reviewPending(card);
     debugSnapshot(card,state,{requestSubmitCalled:requestSubmitCalled,fallbackReviewPendingCalled:fallbackReviewPendingCalled,fallbackReason:fallbackReason});
