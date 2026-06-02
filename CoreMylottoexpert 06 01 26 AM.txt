@@ -24895,15 +24895,52 @@ function mylottoexpertEnsureSkaiBackTestTables($db) {
   `test_variable` varchar(100) NOT NULL DEFAULT '',
   `test_value` varchar(64) NOT NULL DEFAULT '',
   `status` varchar(32) NOT NULL DEFAULT 'pending',
+  `target_draw_date` date DEFAULT NULL COMMENT 'Canonical draw date bound at batch creation time',
+  `target_draw_at` datetime DEFAULT NULL COMMENT 'Canonical draw timestamp (UTC) bound at batch creation time',
+  `target_draw_timezone` varchar(64) DEFAULT NULL COMMENT 'Official lottery draw timezone e.g. America/New_York',
+  `target_draw_label` varchar(191) DEFAULT NULL COMMENT 'Human-readable draw label e.g. Draw: Jun 3 2026 ET',
   `created_at` datetime NOT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_batch_id` (`batch_id`),
   KEY `idx_user_lottery` (`user_id`,`lottery_id`),
-  KEY `idx_status` (`status`)
+  KEY `idx_status` (`status`),
+  KEY `idx_run_draw` (`batch_id`,`run_order`,`target_draw_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
     try { $db->setQuery($sql1); $db->execute(); } catch (\Throwable $e) {   }
     try { $db->setQuery($sql2); $db->execute(); } catch (\Throwable $e) {   }
     try { $cols = $db->getTableColumns('#__mle_skai_batch_header', false); $names = is_array($cols) ? array_keys($cols) : array(); if (!in_array('batch_type', $names, true)) { $db->setQuery("ALTER TABLE `" . $headerTable . "` ADD COLUMN `batch_type` VARCHAR(64) NOT NULL DEFAULT 'Precision Focus Batch' AFTER `batch_source`"); $db->execute(); } if (!in_array('source_page', $names, true)) { $db->setQuery("ALTER TABLE `" . $headerTable . "` ADD COLUMN `source_page` VARCHAR(64) NOT NULL DEFAULT 'MyLottoExpert' AFTER `batch_type`"); $db->execute(); } if (!in_array('locked_settings_id', $names, true)) { $db->setQuery("ALTER TABLE `" . $headerTable . "` ADD COLUMN `locked_settings_id` INT(11) NOT NULL DEFAULT 0 AFTER `base_settings_id`"); $db->execute(); } } catch (\Throwable $e) {   }
+    // [[MLE_BATCH_RUN_DRAW_COLS_2026_06_02]] Idempotent migration: add direct draw-date columns to
+    // mle_skai_batch_run for tables created before this schema version. These columns mirror the values
+    // already stored inside full_settings_json so that diagnostics and direct queries can access them
+    // without JSON_EXTRACT. Safe to call multiple times; each ADD COLUMN is skipped when the column exists.
+    try {
+        $runColNames = array_keys((array)$db->getTableColumns('#__mle_skai_batch_run', false));
+        if (!in_array('target_draw_date', $runColNames, true)) {
+            $db->setQuery("ALTER TABLE `" . $runTable . "` ADD COLUMN `target_draw_date` DATE DEFAULT NULL COMMENT 'Canonical draw date bound at batch creation time' AFTER `status`");
+            $db->execute();
+        }
+        if (!in_array('target_draw_at', $runColNames, true)) {
+            $db->setQuery("ALTER TABLE `" . $runTable . "` ADD COLUMN `target_draw_at` DATETIME DEFAULT NULL COMMENT 'Canonical draw timestamp (UTC) bound at batch creation time' AFTER `target_draw_date`");
+            $db->execute();
+        }
+        if (!in_array('target_draw_timezone', $runColNames, true)) {
+            $db->setQuery("ALTER TABLE `" . $runTable . "` ADD COLUMN `target_draw_timezone` VARCHAR(64) DEFAULT NULL COMMENT 'Official lottery draw timezone e.g. America/New_York' AFTER `target_draw_at`");
+            $db->execute();
+        }
+        if (!in_array('target_draw_label', $runColNames, true)) {
+            $db->setQuery("ALTER TABLE `" . $runTable . "` ADD COLUMN `target_draw_label` VARCHAR(191) DEFAULT NULL COMMENT 'Human-readable draw label e.g. Draw: Jun 3 2026 ET' AFTER `target_draw_timezone`");
+            $db->execute();
+        }
+        $runIdxNames = array();
+        try {
+            $db->setQuery('SHOW INDEX FROM `' . $runTable . '`');
+            $runIdxRows = $db->loadAssocList();
+            $runIdxNames = array_column((array)$runIdxRows, 'Key_name');
+        } catch (\Throwable $e) {   }
+        if (!in_array('idx_run_draw', (array)$runIdxNames, true)) {
+            try { $db->setQuery("ALTER TABLE `" . $runTable . "` ADD KEY `idx_run_draw` (`batch_id`,`run_order`,`target_draw_date`)"); $db->execute(); } catch (\Throwable $e) {   }
+        }
+    } catch (\Throwable $e) {   }
 }
 
 function mylottoexpertGetTableColumnNames($db, $tableName)
@@ -26722,8 +26759,14 @@ if ($__mleAction === 'create_skai_batch') {
             $__batchRunSettings['is_control_run']          = (int)$__batchIsControl;
             $__batchRunSettings['source_resolution_notes'] = (string)($__batchSourceTrace['source_resolution_notes'] ?? '');
             $__batchRunSettingsJson = json_encode($__batchRunSettings, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            // [[MLE_BATCH_RUN_DRAW_COLS_2026_06_02]] Write target_draw_* as direct columns in addition to
+            // full_settings_json so that diagnostics and direct queries work without JSON_EXTRACT.
+            $__batchRunDirectDrawDate = ($__batchTargetDrawDate !== '') ? $db->quote($__batchTargetDrawDate) : 'NULL';
+            $__batchRunDirectDrawAt   = !empty($__batchDrawTarget['target_draw_at']) ? $db->quote((string)$__batchDrawTarget['target_draw_at']) : 'NULL';
+            $__batchRunDirectDrawTz   = !empty($__batchDrawTarget['target_draw_timezone']) ? $db->quote((string)$__batchDrawTarget['target_draw_timezone']) : 'NULL';
+            $__batchRunDirectDrawLbl  = !empty($__batchDrawTarget['target_draw_label']) ? $db->quote(mb_substr((string)$__batchDrawTarget['target_draw_label'], 0, 191, 'UTF-8')) : 'NULL';
             $db->setQuery(
-                "INSERT INTO `{$__batchRunTable}` (`batch_id`,`user_id`,`lottery_id`,`run_order`,`run_name`,`is_control`,`source`,`full_settings_json`,`test_variable`,`test_value`,`status`,`created_at`) VALUES ("
+                "INSERT INTO `{$__batchRunTable}` (`batch_id`,`user_id`,`lottery_id`,`run_order`,`run_name`,`is_control`,`source`,`full_settings_json`,`test_variable`,`test_value`,`status`,`target_draw_date`,`target_draw_at`,`target_draw_timezone`,`target_draw_label`,`created_at`) VALUES ("
                 . (int)$__batchHeaderId . ','
                 . (int)$workspaceUserId . ','
                 . (int)$__batchLotteryId . ','
@@ -26735,6 +26778,10 @@ if ($__mleAction === 'create_skai_batch') {
                 . $db->quote($__batchTestVar) . ','
                 . $db->quote($__batchRunTestValue) . ','
                 . $db->quote('pending') . ','
+                . $__batchRunDirectDrawDate . ','
+                . $__batchRunDirectDrawAt . ','
+                . $__batchRunDirectDrawTz . ','
+                . $__batchRunDirectDrawLbl . ','
                 . $db->quote($__batchNow)
                 . ')'
             );
