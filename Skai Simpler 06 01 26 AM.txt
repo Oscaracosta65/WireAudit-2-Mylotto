@@ -16385,68 +16385,142 @@ $labelInput = implode(' - ', $parts);
             $evidenceJson = null;
         }
 
-        // Optional next_draw_date/next_draw_at - prefer POST, then DB meta, then config; else NULL
-        // CHG: DO NOT reset to NULL here. These may already be resolved above from POST/meta.
+        // Optional next_draw_date/next_draw_at - prefer POST, then DB meta, then config; else NULL.
+        // [[MLE_DRAW_TZ_FIX_2026]] Batch run full_settings_json target draw fields are authoritative.
         $nextDrawDateSql = (isset($nextDrawDateSql) && trim((string)$nextDrawDateSql) !== '')
             ? substr(trim((string)$nextDrawDateSql), 0, 10)
             : null;
-
         $nextDrawAtSql = (isset($nextDrawAtSql) && trim((string)$nextDrawAtSql) !== '')
             ? (string)$nextDrawAtSql
             : null;
-
-
-        // 1) Prefer an explicit posted next_draw_date if present (for parity with other modules)
-        $postedNext = trim((string) $in->getString('next_draw_date', ''));
-        if ($postedNext !== '') {
-            // Store as simple YYYY-MM-DD (strip time if any); validate format strictly
-            $postedNextDate = substr($postedNext, 0, 10);
-            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $postedNextDate) && strtotime($postedNextDate) !== false) {
-                $nextDrawDateSql = $postedNextDate;
+        $skaiBatchTargetDraw = array(
+            'has_valid_target_draw_date' => false,
+            'target_draw_date' => null,
+            'target_draw_at' => null,
+            'target_draw_timezone' => null,
+            'target_draw_label' => null,
+            'target_draw_source' => null,
+            'target_draw_resolution_note' => null,
+            'target_draw_at_tz' => null,
+        );
+        $skaiSourceBatchRunId = (int)$in->getInt('source_batch_run_id', 0);
+        if ($skaiSourceBatchRunId > 0) {
+            try {
+                $skaiRunTables = array_map('strtolower', array_keys((array)$db->getTableList()));
+                $skaiRunTable  = strtolower(str_replace('#__', $db->getPrefix(), '#__mle_skai_batch_run'));
+                if (in_array($skaiRunTable, $skaiRunTables, true)) {
+                    $skaiRunQ = $db->getQuery(true)
+                        ->select($db->quoteName('full_settings_json'))
+                        ->from($db->quoteName('#__mle_skai_batch_run'))
+                        ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchRunId);
+                    $db->setQuery($skaiRunQ, 0, 1);
+                    $skaiRunJson = (string)($db->loadResult() ?? '');
+                    if ($skaiRunJson !== '') {
+                        $skaiRunSettings = json_decode($skaiRunJson, true);
+                        if (json_last_error() === JSON_ERROR_NONE && is_array($skaiRunSettings)) {
+                            $runTdd = trim((string)($skaiRunSettings['target_draw_date'] ?? ''));
+                            if ($runTdd !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $runTdd) && strtotime($runTdd) !== false) {
+                                $skaiBatchTargetDraw['has_valid_target_draw_date'] = true;
+                                $skaiBatchTargetDraw['target_draw_date'] = $runTdd;
+                            }
+                            $runTdtz = trim((string)($skaiRunSettings['target_draw_timezone'] ?? ''));
+                            if ($runTdtz !== '') {
+                                try {
+                                    new \DateTimeZone($runTdtz);
+                                    $skaiBatchTargetDraw['target_draw_timezone'] = $runTdtz;
+                                } catch (\Throwable $__) {}
+                            }
+                            $runTdatTz = trim((string)($skaiRunSettings['target_draw_at_tz'] ?? ''));
+                            if ($runTdatTz !== '') {
+                                try {
+                                    new \DateTimeZone($runTdatTz);
+                                    $skaiBatchTargetDraw['target_draw_at_tz'] = $runTdatTz;
+                                } catch (\Throwable $__) {}
+                            }
+                            $runTda = trim((string)($skaiRunSettings['target_draw_at'] ?? ''));
+                            if ($runTda !== '') {
+                                try {
+                                    $runAtTz = (string)($skaiBatchTargetDraw['target_draw_at_tz'] ?? $skaiBatchTargetDraw['target_draw_timezone'] ?? $drawTz);
+                                    $skaiBatchTargetDraw['target_draw_at'] = (new Date($runTda, $runAtTz))->toSql();
+                                } catch (\Throwable $__) {}
+                            }
+                            $runTdl = trim((string)($skaiRunSettings['target_draw_label'] ?? ''));
+                            if ($runTdl !== '') {
+                                $skaiBatchTargetDraw['target_draw_label'] = mb_substr($runTdl, 0, 191, 'UTF-8');
+                            }
+                            $runTds = trim((string)($skaiRunSettings['target_draw_source'] ?? ''));
+                            if ($runTds !== '') {
+                                $skaiBatchTargetDraw['target_draw_source'] = mb_substr($runTds, 0, 80, 'UTF-8');
+                            }
+                            $runTdrn = trim((string)($skaiRunSettings['target_draw_resolution_note'] ?? ''));
+                            if ($runTdrn !== '') {
+                                $skaiBatchTargetDraw['target_draw_resolution_note'] = $runTdrn;
+                            }
+                        }
+                    }
+                }
+                unset($skaiRunQ, $skaiRunJson, $skaiRunSettings, $runTdd, $runTda, $runTdtz, $runTdl, $runTds, $runTdrn, $runTdatTz, $runAtTz, $skaiRunTable, $skaiRunTables);
+            } catch (\Throwable $__) { /* ignore and use resolver fallback */ }
+        }
+        if (!empty($skaiBatchTargetDraw['has_valid_target_draw_date'])) {
+            $nextDrawDateSql = (string)$skaiBatchTargetDraw['target_draw_date'];
+            if (!empty($skaiBatchTargetDraw['target_draw_at'])) {
+                $nextDrawAtSql = (string)$skaiBatchTargetDraw['target_draw_at'];
             }
-            // If format is invalid, $nextDrawDateSql stays at its current value (from DB meta)
+            if (!empty($skaiBatchTargetDraw['target_draw_timezone'])) {
+                $drawTz = (string)$skaiBatchTargetDraw['target_draw_timezone'];
+            }
+        } else {
+            // 1) Prefer an explicit posted next_draw_date if present (for parity with other modules)
+            $postedNext = trim((string) $in->getString('next_draw_date', ''));
+            if ($postedNext !== '') {
+                $postedNextDate = substr($postedNext, 0, 10);
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $postedNextDate) && strtotime($postedNextDate) !== false) {
+                    $nextDrawDateSql = $postedNextDate;
+                }
+            }
         }
 
-        // 2) Fallbacks from DB meta and config (only if POST was empty)
+        // 2) Fallbacks from DB meta and config (only if authoritative batch date is missing/invalid)
         $ndd = $skaiDbMeta['next_draw_date'] ?? null;
         $nda = $skaiDbMeta['next_draw_at']   ?? null;
-
-        // [[MLE_DRAW_TZ_FIX_2026]] Parse next-draw timestamps using LOTTERY timezone ($drawTz),
-        // not site/user timezone ($siteTz).  This prevents midnight-UTC rollover from shifting
-        // the draw date forward when the server is UTC but the draw occurs in Eastern time.
-        try {
-            if ($nextDrawDateSql === null && !empty($ndd)) {
-                // Extract Y-m-d in the lottery-local timezone
-                if (preg_match('/^(\d{4}-\d{2}-\d{2})/', (string)$ndd, $__nm)) {
-                    $nextDrawDateSql = $__nm[1];
-                } else {
-                    $nextDrawDateSql = (new Date($ndd, $drawTz))->format('Y-m-d', true);
-                }
-                unset($__nm);
-            } elseif ($nextDrawDateSql === null && !empty($lotteryConfig['next_draw_date'])) {
-                $__cfgNdd = (string)$lotteryConfig['next_draw_date'];
-                if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $__cfgNdd, $__nm)) {
-                    $nextDrawDateSql = $__nm[1];
-                } else {
-                    $nextDrawDateSql = (new Date($__cfgNdd, $drawTz))->format('Y-m-d', true);
-                }
-                unset($__cfgNdd, $__nm);
-            }
-        } catch (\Throwable $e) { /* ignore; leave as NULL */ }
-
-        // 3) Final fallback: proven backward scan in draw table
-        if ($nextDrawDateSql === null && !empty($dbCol)) {
+        if (empty($skaiBatchTargetDraw['has_valid_target_draw_date'])) {
+            // [[MLE_DRAW_TZ_FIX_2026]] Parse next-draw timestamps using LOTTERY timezone ($drawTz),
+            // not site/user timezone ($siteTz).  This prevents midnight-UTC rollover from shifting
+            // the draw date forward when the server is UTC but the draw occurs in Eastern time.
             try {
-                $fallbackNdd = getNextDrawDate($selectedGameId, $db, $dbCol);
-                if (!empty($fallbackNdd)) {
-                    if (preg_match('/^(\d{4}-\d{2}-\d{2})/', (string)$fallbackNdd, $__nm)) {
+                if ($nextDrawDateSql === null && !empty($ndd)) {
+                    if (preg_match('/^(\d{4}-\d{2}-\d{2})/', (string)$ndd, $__nm)) {
                         $nextDrawDateSql = $__nm[1];
                     } else {
-                        $nextDrawDateSql = (new Date($fallbackNdd, $drawTz))->format('Y-m-d', true);
+                        $nextDrawDateSql = (new Date($ndd, $drawTz))->format('Y-m-d', true);
                     }
                     unset($__nm);
+                } elseif ($nextDrawDateSql === null && !empty($lotteryConfig['next_draw_date'])) {
+                    $__cfgNdd = (string)$lotteryConfig['next_draw_date'];
+                    if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $__cfgNdd, $__nm)) {
+                        $nextDrawDateSql = $__nm[1];
+                    } else {
+                        $nextDrawDateSql = (new Date($__cfgNdd, $drawTz))->format('Y-m-d', true);
+                    }
+                    unset($__cfgNdd, $__nm);
                 }
-            } catch (\Throwable $__) { /* ignore */ }
+            } catch (\Throwable $e) { /* ignore; leave as NULL */ }
+
+            // 3) Final fallback: proven backward scan in draw table
+            if ($nextDrawDateSql === null && !empty($dbCol)) {
+                try {
+                    $fallbackNdd = getNextDrawDate($selectedGameId, $db, $dbCol);
+                    if (!empty($fallbackNdd)) {
+                        if (preg_match('/^(\d{4}-\d{2}-\d{2})/', (string)$fallbackNdd, $__nm)) {
+                            $nextDrawDateSql = $__nm[1];
+                        } else {
+                            $nextDrawDateSql = (new Date($fallbackNdd, $drawTz))->format('Y-m-d', true);
+                        }
+                        unset($__nm);
+                    }
+                } catch (\Throwable $__) { /* ignore */ }
+            }
         }
 
         if ($nextDrawDateSql !== null) {
@@ -16454,10 +16528,10 @@ $labelInput = implode(' - ', $parts);
         }
 
         try {
-            if (!empty($nda)) {
+            if ($nextDrawAtSql === null && !empty($nda)) {
                 // Full timestamp for next_draw_at (DATETIME column) - use lottery TZ
                 $nextDrawAtSql = (new Date($nda, $drawTz))->toSql();
-            } elseif (!empty($lotteryConfig['next_draw_at'])) {
+            } elseif ($nextDrawAtSql === null && !empty($lotteryConfig['next_draw_at'])) {
                 $nextDrawAtSql = (new Date($lotteryConfig['next_draw_at'], $drawTz))->toSql();
             }
         } catch (\Throwable $e) { /* ignore; leave as NULL */ }
@@ -16471,46 +16545,6 @@ $labelInput = implode(' - ', $parts);
             $drawSessionSql = preg_replace('/[^a-zA-Z0-9_\-]/', '', substr((string) $skaiDbMeta['draw_session'], 0, 40));
         }
         if ($drawSessionSql === '') { $drawSessionSql = null; }
-
-        // [[MLE_DRAW_TZ_FIX_2026]] Preserve target_draw_date and target_draw_timezone from
-        // the originating batch run full_settings_json when this save is part of an MLE
-        // precision-lock batch.  This prevents SKAI's save path from recalculating
-        // target_draw_date through user/site timezone.
-        $__skaiPreBatchRunId = (int)$in->getInt('source_batch_run_id', 0);
-        if ($__skaiPreBatchRunId > 0) {
-            try {
-                $__skaiRunTables = array_map('strtolower', array_keys((array)$db->getTableList()));
-                $__skaiRunTable  = strtolower(str_replace('#__', $db->getPrefix(), '#__mle_skai_batch_run'));
-                if (in_array($__skaiRunTable, $__skaiRunTables, true)) {
-                    $__skaiRunQ = $db->getQuery(true)
-                        ->select($db->quoteName('full_settings_json'))
-                        ->from($db->quoteName('#__mle_skai_batch_run'))
-                        ->where($db->quoteName('id') . ' = ' . $__skaiPreBatchRunId);
-                    $db->setQuery($__skaiRunQ, 0, 1);
-                    $__skaiRunJson = (string)($db->loadResult() ?? '');
-                    if ($__skaiRunJson !== '') {
-                        $__skaiRunSettings = json_decode($__skaiRunJson, true);
-                        if (json_last_error() === JSON_ERROR_NONE && is_array($__skaiRunSettings)) {
-                            $__runTdd = trim((string)($__skaiRunSettings['target_draw_date'] ?? ''));
-                            $__runTdtz = trim((string)($__skaiRunSettings['target_draw_timezone'] ?? ''));
-                            // Preserve date exactly as stored in batch - no re-interpretation
-                            if ($__runTdd !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $__runTdd)) {
-                                $nextDrawDateSql = $__runTdd;
-                            }
-                            // Prefer batch timezone over the locally resolved lottery timezone
-                            if ($__runTdtz !== '') {
-                                try {
-                                    new \DateTimeZone($__runTdtz);
-                                    $drawTz = $__runTdtz;
-                                } catch (\Throwable $__) {}
-                            }
-                        }
-                    }
-                    unset($__skaiRunQ, $__skaiRunJson, $__skaiRunSettings, $__runTdd, $__runTdtz, $__skaiRunTable, $__skaiRunTables);
-                }
-            } catch (\Throwable $__) { /* ignore; continue with locally resolved values */ }
-        }
-        unset($__skaiPreBatchRunId);
 
         // Canonical immutable draw target binding for this saved prediction.
         $predictionTarget = skaiBuildPredictionTarget([
@@ -16871,7 +16905,9 @@ $__regularExtraDisplayArr = array_values(array_slice(array_map('intval', is_arra
 // Mirrors mylottoexpertResolveOfficialDrawTarget() label logic so direct SKAI saves display the same format.
 $__skaiDrawLabel = '';
 $__skaiDrawLabelDate = (string)($predictionTarget['target_draw_date'] ?? $nextDrawDateSql ?? '');
-if ($__skaiDrawLabelDate !== '') {
+if (!empty($skaiBatchTargetDraw['target_draw_label'])) {
+    $__skaiDrawLabel = (string)$skaiBatchTargetDraw['target_draw_label'];
+} elseif ($__skaiDrawLabelDate !== '') {
     try {
         $__dtLabel = new \Joomla\CMS\Date\Date($__skaiDrawLabelDate . ' 00:00:00', $drawTz);
         $__tzAbbrMap = array(
@@ -16887,6 +16923,19 @@ if ($__skaiDrawLabelDate !== '') {
         $__skaiDrawLabel = 'Draw: ' . $__dtLabel->format('M j, Y', true) . ' ' . $__tzDisplay;
     } catch (\Throwable $__) {
         $__skaiDrawLabel = 'Draw: ' . $__skaiDrawLabelDate;
+    }
+}
+$__skaiDrawSource = !empty($skaiBatchTargetDraw['target_draw_source'])
+    ? (string)$skaiBatchTargetDraw['target_draw_source']
+    : 'lottery_timezone_resolver';
+$__skaiDrawResolutionNote = !empty($skaiBatchTargetDraw['target_draw_resolution_note'])
+    ? (string)$skaiBatchTargetDraw['target_draw_resolution_note']
+    : (isset($lotteryTz) && $lotteryTz !== '' ? 'resolved_from_lottery_config' : (isset($drawTz) ? 'resolved_from_draw_family_or_site_fallback' : 'unknown'));
+if (!empty($skaiBatchTargetDraw['has_valid_target_draw_date'])) {
+    if (strpos($__skaiDrawResolutionNote, 'preserved_from_batch_full_settings_json') === false) {
+        $__skaiDrawResolutionNote = trim($__skaiDrawResolutionNote) !== ''
+            ? ($__skaiDrawResolutionNote . ' | preserved_from_batch_full_settings_json')
+            : 'preserved_from_batch_full_settings_json';
     }
 }
 
@@ -16916,10 +16965,11 @@ $row = (object) [
     'target_draw_session' => ($predictionTarget['target_draw_session'] ?? null),
     'target_timezone_id'  => ($predictionTarget['target_timezone_id'] ?? null),
     // [[MLE_DRAW_TZ_FIX_2026]] Traceability fields - written to row when columns exist
-    'target_draw_timezone'        => isset($drawTz) ? $drawTz : ($predictionTarget['target_timezone_id'] ?? null),
+    'target_draw_timezone'        => !empty($skaiBatchTargetDraw['target_draw_timezone']) ? (string)$skaiBatchTargetDraw['target_draw_timezone'] : (isset($drawTz) ? $drawTz : ($predictionTarget['target_timezone_id'] ?? null)),
+    'target_draw_at_tz'           => !empty($skaiBatchTargetDraw['target_draw_at_tz']) ? (string)$skaiBatchTargetDraw['target_draw_at_tz'] : null,
     'target_draw_label'           => ($__skaiDrawLabel !== '' ? $__skaiDrawLabel : null),
-    'target_draw_source'          => 'lottery_timezone_resolver',
-    'target_draw_resolution_note' => isset($lotteryTz) && $lotteryTz !== '' ? 'resolved_from_lottery_config' : (isset($drawTz) ? 'resolved_from_draw_family_or_site_fallback' : 'unknown'),
+    'target_draw_source'          => ($__skaiDrawSource !== '' ? $__skaiDrawSource : null),
+    'target_draw_resolution_note' => ($__skaiDrawResolutionNote !== '' ? $__skaiDrawResolutionNote : null),
     'target_prediction_family' => ($predictionTarget['target_prediction_family'] ?? null),
     'target_prediction_type' => ($predictionTarget['target_prediction_type'] ?? null),
     'target_pick_size'    => ($predictionTarget['target_pick_size'] ?? null),
