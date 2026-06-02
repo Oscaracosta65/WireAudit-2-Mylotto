@@ -17240,6 +17240,65 @@ $row = (object) [
         : (count($mainArr) . ' main' . (!empty($extraArr) ? ' + ' . count($extraArr) . ' bonus' : '')),
 ];
 
+        // [[SKAI_MLE_BATCH_SAVE_STRICT_VALIDATION]]
+        // In MyLottoExpert batch mode, block loose rows unless the posted batch context
+        // resolves to a real batch header + run row with matching lottery context.
+        if ($skaiBatchSaveMode) {
+            $skaiBatchValidationFail = '';
+            $skaiHeaderLotteryId = 0;
+            $skaiSavedLotteryId = (int)($row->lottery_id ?? 0);
+            $skaiTargetLotteryId = (int)($predictionTarget['target_lottery_id'] ?? 0);
+            if ($skaiSourceBatchId <= 0 || $skaiSourceBatchRunOrder < 1 || $skaiSourceBatchRunOrder > 9) {
+                $skaiBatchValidationFail = 'batch_context_missing';
+            } else {
+                try {
+                    $skaiMleHeaderQ = $db->getQuery(true)
+                        ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
+                        ->from($db->quoteName('#__mle_skai_batch_header'))
+                        ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchId)
+                        ->setLimit(1);
+                    $db->setQuery($skaiMleHeaderQ);
+                    $skaiMleHeaderRow = $db->loadAssoc();
+                    if (!is_array($skaiMleHeaderRow) || empty($skaiMleHeaderRow)) {
+                        $skaiBatchValidationFail = 'batch_context_missing';
+                    } else {
+                        $skaiHeaderLotteryId = (int)($skaiMleHeaderRow['lottery_id'] ?? 0);
+                        if (
+                            $skaiHeaderLotteryId <= 0
+                            || ($skaiSavedLotteryId > 0 && $skaiSavedLotteryId !== $skaiHeaderLotteryId)
+                            || ($skaiTargetLotteryId > 0 && $skaiTargetLotteryId !== $skaiHeaderLotteryId)
+                        ) {
+                            $skaiBatchValidationFail = 'batch_lottery_mismatch';
+                        } else {
+                            $skaiMleRunQ = $db->getQuery(true)
+                                ->select($db->quoteName('id'))
+                                ->from($db->quoteName('#__mle_skai_batch_run'))
+                                ->where($db->quoteName('batch_id') . ' = ' . (int)$skaiSourceBatchId)
+                                ->where($db->quoteName('run_order') . ' = ' . (int)$skaiSourceBatchRunOrder)
+                                ->order($db->quoteName('id') . ' DESC')
+                                ->setLimit(1);
+                            $db->setQuery($skaiMleRunQ);
+                            $skaiMleRunId = (int)$db->loadResult();
+                            if ($skaiMleRunId <= 0) {
+                                $skaiBatchValidationFail = 'batch_run_missing';
+                            }
+                        }
+                    }
+                } catch (\Throwable $__skaiMleBatchValidationEx) {
+                    $skaiBatchValidationFail = 'batch_context_missing';
+                }
+            }
+            if ($skaiBatchValidationFail !== '') {
+                skai_debug_log('[SKAI BATCH SAVE BLOCKED] reason=' . $skaiBatchValidationFail . ' uid=' . (int)$user->id . ' batch_id=' . (int)$skaiSourceBatchId . ' run_order=' . (int)$skaiSourceBatchRunOrder . ' saved_lottery_id=' . (int)$skaiSavedLotteryId . ' target_lottery_id=' . (int)$skaiTargetLotteryId . ' header_lottery_id=' . (int)$skaiHeaderLotteryId);
+                $skaiRespondBatchJson(false, [
+                    'reason' => (string)$skaiBatchValidationFail,
+                    'batch_index' => (int)$skaiBatchSaveIndex,
+                    'batch_total' => (int)$skaiBatchSaveTotal,
+                    'batch_label' => (string)$skaiBatchSaveLabel
+                ]);
+            }
+        }
+
         // Normalize: convert empty strings to NULL to avoid '' in nullable columns
         foreach ($row as $k => $v) {
             if ($v === '') { $row->$k = null; }
