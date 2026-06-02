@@ -674,6 +674,7 @@ try {
     $skaiMleGuidedMode = strtolower(trim((string)$in->getCmd('mle_guided_mode', '')));
     $skaiMleRequiredAction = strtolower(trim((string)$in->getCmd('mle_required_action', '')));
     $skaiMleBatchId = (int)$in->getInt('batch_id', 0);
+    $skaiMleLotteryId = (int)$in->getInt('lottery_id', 0);
     $skaiMleBatchRequested = ((int)$in->getInt('mle_skai_batch', 0) === 1) || ($skaiMleBatchId > 0 && $skaiMleGuidedMode === 'required');
     $skaiMleGuidedRequested = ($skaiMleBatchId > 0 && $skaiMleGuidedMode === 'required');
     $skaiMleServerBatchStatus['requested'] = (bool)$skaiMleBatchRequested;
@@ -697,6 +698,17 @@ try {
                 ->setLimit(1);
             $skaiMleDb->setQuery($skaiMleHq);
             $skaiMleHeader = $skaiMleDb->loadAssoc();
+            // [[MLE_BATCH_LOTTERY_GUARD]] Reject batch if its lottery_id does not match the
+            // current page lottery_id supplied in the URL. This prevents a batch that belongs
+            // to one lottery (e.g. Washington Hit 5, batch_id=59) from being loaded and used
+            // on a SKAI session for a different lottery (e.g. Florida Fantasy 5).
+            if (is_array($skaiMleHeader) && !empty($skaiMleHeader)) {
+                $skaiMleHeaderLotIdCheck = (int)($skaiMleHeader['lottery_id'] ?? 0);
+                if ($skaiMleLotteryId > 0 && $skaiMleHeaderLotIdCheck > 0 && $skaiMleHeaderLotIdCheck !== $skaiMleLotteryId) {
+                    $skaiMleServerBatchStatus['reason'] = 'lottery_id_mismatch';
+                    $skaiMleHeader = null;
+                }
+            }
             if (is_array($skaiMleHeader) && !empty($skaiMleHeader)) {
                 $skaiMleServerBatchStatus['reason'] = 'header_found';
                 // Header ownership above is the primary security gate. Child rows are
@@ -59790,7 +59802,19 @@ document.addEventListener('DOMContentLoaded', function () {
         payload = serverPayload;
       } else if (storagePayload && storagePayload.runs && storagePayload.runs.length === 9) {
         var storageBatchId = parseInt(storagePayload.batch_id || 0, 10) || 0;
-        if (!urlBatchId || !storageBatchId || storageBatchId === urlBatchId) {
+        var storageLotteryId = parseInt(storagePayload.lottery_id || 0, 10) || 0;
+        var storageGameId = String(storagePayload.game_id || '').toLowerCase();
+        var urlLotteryId = 0;
+        var urlGameId = '';
+        try { urlLotteryId = parseInt(skaiMleGetUrlParam('lottery_id') || '0', 10) || 0; } catch (_) {}
+        try { urlGameId = String(skaiMleGetUrlParam('game_id') || skaiMleGetUrlParam('gameId') || '').toLowerCase(); } catch (_) {}
+        // [[MLE_STORAGE_LOTTERY_GUARD]] Reject stale storage payload when the lottery or
+        // game context does not match the current page. This prevents a payload that was
+        // stored for one lottery (e.g. Washington Hit 5, batch_id=59) from being applied
+        // to a SKAI session for a different lottery (e.g. Florida Fantasy 5).
+        var lotteryOk = !(urlLotteryId > 0 && storageLotteryId > 0 && storageLotteryId !== urlLotteryId);
+        var gameOk = !(urlGameId !== '' && storageGameId !== '' && storageGameId !== urlGameId);
+        if (lotteryOk && gameOk && (!urlBatchId || !storageBatchId || storageBatchId === urlBatchId)) {
           payload = storagePayload;
         } else {
           try {
@@ -61611,7 +61635,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var _ctxBatchId = (window.MLE_PRECISION_BATCH_CONTEXT && window.MLE_PRECISION_BATCH_CONTEXT.batch_id) ? window.MLE_PRECISION_BATCH_CONTEXT.batch_id : '';
     var _batchIdResolved = parseInt((_mleBatch && _mleBatch.batch_id) || _ctxBatchId || _bfUrlParam('batch_id') || '0', 10) || 0;
     var _batchOrderResolved = parseInt((_mleBatch && _mleBatch.batch_run_order) || _payload['batch_save_index'] || (idx + 1), 10) || (idx + 1);
-    if (_batchIdResolved > 0 || _batchOrderResolved > 0 || (r.combo && r.combo.mlePrecisionLock)) {
+    if (_batchIdResolved > 0 || (r.combo && r.combo.mlePrecisionLock)) {
       _payload['origin_source'] = 'mle_precision_lock_batch';
       if (_batchIdResolved > 0) { _payload['source_batch_id'] = String(_batchIdResolved); }
       if (_mleBatch && _mleBatch.batch_run_id) { _payload['source_batch_run_id'] = String(_mleBatch.batch_run_id); }

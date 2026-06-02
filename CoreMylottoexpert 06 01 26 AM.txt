@@ -46640,7 +46640,8 @@ The server-rendered phase state is now the source of truth.
         if (at === 'history_window_check' || at === 'prediction_9_batch') {
             btn.addEventListener('click', function () {
                 var f = mleV128FindForm(btn);
-                if (f) { f.submit(); }
+                if (f) { f.submit(); return; }
+                if (window.alert) { window.alert('The tracked 9-run batch form is missing. Please refresh and try again.'); }
             }, false);
         } else if (at === 'regular_skai_batch' || at === 'regular_skai') {
             btn.addEventListener('click', function () {
