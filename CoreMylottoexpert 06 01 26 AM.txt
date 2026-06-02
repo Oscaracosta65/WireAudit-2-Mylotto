@@ -639,6 +639,32 @@ if (!function_exists('mylottoexpertSetHiddenLotteryIds')) {
         return mylottoexpertSetUserPref($db, (int)$userId, 'hidden_lottery_ids', json_encode(mylottoexpertNormalizeLotteryIdList($ids)));
     }
 }
+if (!function_exists('mylottoexpertUnhideLotteryForUser')) {
+    function mylottoexpertUnhideLotteryForUser($db, $userId, $lotteryId)
+    {
+        $userId = (int)$userId;
+        $lotteryId = (int)$lotteryId;
+        if ($userId <= 0 || $lotteryId <= 0) {
+            return false;
+        }
+        $hiddenIds = mylottoexpertGetHiddenLotteryIds($db, $userId);
+        $changed = false;
+        $next = array();
+        foreach ((array)$hiddenIds as $id) {
+            $id = (int)$id;
+            if ($id <= 0) { continue; }
+            if ($id === $lotteryId) {
+                $changed = true;
+                continue;
+            }
+            $next[$id] = $id;
+        }
+        if ($changed) {
+            mylottoexpertSetHiddenLotteryIds($db, $userId, array_values($next));
+        }
+        return $changed;
+    }
+}
 if (!function_exists('mylottoexpertCurrentUserIsAdmin')) {
     function mylottoexpertCurrentUserIsAdmin()
     {
@@ -26831,18 +26857,7 @@ if ($__mleAction === 'create_skai_batch') {
                 ),
             ));
         } catch (\Throwable $e) {   }
-        try {
-            $__mleHiddenForBatch = mylottoexpertGetHiddenLotteryIds($db, $workspaceUserId);
-            $__mleHiddenForBatchMap = array();
-            foreach ((array)$__mleHiddenForBatch as $__mleHiddenRow) {
-                $__mleHiddenRowId = (int)$__mleHiddenRow;
-                if ($__mleHiddenRowId > 0 && $__mleHiddenRowId !== (int)$__batchLotteryId) {
-                    $__mleHiddenForBatchMap[$__mleHiddenRowId] = $__mleHiddenRowId;
-                }
-            }
-            mylottoexpertSetHiddenLotteryIds($db, $workspaceUserId, array_values($__mleHiddenForBatchMap));
-            unset($__mleHiddenForBatch, $__mleHiddenForBatchMap, $__mleHiddenRow, $__mleHiddenRowId);
-        } catch (\Throwable $__mleHiddenRefreshEx) {   }
+        try { mylottoexpertUnhideLotteryForUser($db, $workspaceUserId, (int)$__batchLotteryId); } catch (\Throwable $__mleHiddenRefreshEx) {   }
         error_log('[MLE SKAI TRACE] response_sent action=create_skai_batch user_id=' . (int)$workspaceUserId . ' lottery_id=' . (int)$__batchLotteryId . ' batch_id=' . (int)$__batchHeaderId . ' queue_id=' . (int)$__batchResearchQueueId . ' assignment_id=' . (int)$__batchResearchAssignmentId . ' skai_url=' . (string)$__batchOpenSkaiUrl);
         $app->enqueueMessage($__batchTypeLabel . ' created. LottoExpert is opening the correct SKAI lottery page now. Research mode: ' . str_replace('_', ' ', (string)$__batchV97ResearchMode) . '.', 'message');
         $app->redirect($__batchOpenSkaiUrl);

@@ -61,6 +61,102 @@ if (!function_exists('skai_debug_log')) {
         return;
     }
 }
+if (!function_exists('mylottoexpertNormalizeLotteryIdList')) {
+    function mylottoexpertNormalizeLotteryIdList($value)
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                $value = $decoded;
+            } else {
+                $value = preg_split('/[^0-9]+/', $value);
+            }
+        }
+        $out = array();
+        foreach ((array)$value as $v) {
+            $id = (int)$v;
+            if ($id > 0) { $out[$id] = $id; }
+        }
+        ksort($out);
+        return array_values($out);
+    }
+}
+if (!function_exists('mylottoexpertGetHiddenLotteryIds')) {
+    function mylottoexpertGetHiddenLotteryIds($db, $userId)
+    {
+        $userId = (int)$userId;
+        if ($userId <= 0) { return array(); }
+        $q = $db->getQuery(true)
+            ->select($db->quoteName('profile_value'))
+            ->from($db->quoteName('#__user_profiles'))
+            ->where($db->quoteName('user_id') . ' = ' . $userId)
+            ->where($db->quoteName('profile_key') . ' = ' . $db->quote('mylotto.hidden_lottery_ids'))
+            ->order($db->quoteName('ordering') . ' ASC')
+            ->setLimit(1);
+        $db->setQuery($q);
+        $raw = $db->loadResult();
+        if ($raw === null || $raw === '') { return array(); }
+        $decoded = json_decode((string)$raw, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            if (is_string($decoded)) { $raw = $decoded; }
+            elseif (is_array($decoded)) { return mylottoexpertNormalizeLotteryIdList($decoded); }
+        }
+        return mylottoexpertNormalizeLotteryIdList((string)$raw);
+    }
+}
+if (!function_exists('mylottoexpertSetHiddenLotteryIds')) {
+    function mylottoexpertSetHiddenLotteryIds($db, $userId, array $ids)
+    {
+        $userId = (int)$userId;
+        if ($userId <= 0) { return false; }
+        $value = json_encode(mylottoexpertNormalizeLotteryIdList($ids));
+        $stored = json_encode((string)$value);
+        $existsQ = $db->getQuery(true)
+            ->select('COUNT(*)')
+            ->from($db->quoteName('#__user_profiles'))
+            ->where($db->quoteName('user_id') . ' = ' . $userId)
+            ->where($db->quoteName('profile_key') . ' = ' . $db->quote('mylotto.hidden_lottery_ids'));
+        $db->setQuery($existsQ);
+        $exists = ((int)$db->loadResult() > 0);
+        if ($exists) {
+            $q = $db->getQuery(true)
+                ->update($db->quoteName('#__user_profiles'))
+                ->set($db->quoteName('profile_value') . ' = ' . $db->quote($stored))
+                ->where($db->quoteName('user_id') . ' = ' . $userId)
+                ->where($db->quoteName('profile_key') . ' = ' . $db->quote('mylotto.hidden_lottery_ids'));
+        } else {
+            $q = $db->getQuery(true)
+                ->insert($db->quoteName('#__user_profiles'))
+                ->columns(array($db->quoteName('user_id'), $db->quoteName('profile_key'), $db->quoteName('profile_value'), $db->quoteName('ordering')))
+                ->values($userId . ',' . $db->quote('mylotto.hidden_lottery_ids') . ',' . $db->quote($stored) . ',0');
+        }
+        $db->setQuery($q);
+        $db->execute();
+        return true;
+    }
+}
+if (!function_exists('mylottoexpertUnhideLotteryForUser')) {
+    function mylottoexpertUnhideLotteryForUser($db, $userId, $lotteryId)
+    {
+        $userId = (int)$userId;
+        $lotteryId = (int)$lotteryId;
+        if ($userId <= 0 || $lotteryId <= 0) { return false; }
+        $hiddenIds = mylottoexpertGetHiddenLotteryIds($db, $userId);
+        $changed = false;
+        $next = array();
+        foreach ((array)$hiddenIds as $id) {
+            $id = (int)$id;
+            if ($id <= 0) { continue; }
+            if ($id === $lotteryId) {
+                $changed = true;
+                continue;
+            }
+            $next[$id] = $id;
+        }
+        if ($changed) { mylottoexpertSetHiddenLotteryIds($db, $userId, array_values($next)); }
+        return $changed;
+    }
+}
 
 use Joomla\CMS\Factory;
 use Joomla\CMS\Uri\Uri;
@@ -17553,6 +17649,13 @@ $row = (object) [
                 error_log('[SKAI V5] saved row id fallback lookup failed: ' . $__skaiSavedIdLookupEx->getMessage());
             }
         }
+        try {
+            $skaiUnhideLotteryId = (int)$lotteryId;
+            if ($skaiUnhideLotteryId <= 0) { $skaiUnhideLotteryId = (int)($row->lottery_id ?? 0); }
+            if ($skaiUnhideLotteryId > 0) {
+                mylottoexpertUnhideLotteryForUser($db, (int)$user->id, $skaiUnhideLotteryId);
+            }
+        } catch (\Throwable $__skaiUnhideEx) { }
         skai_debug_log('[SKAI SAVE SUCCESS] row_id=' . (int)$newId . ' uid=' . (int)$user->id . ' lotId=' . (int)$lotteryId . ' source=' . (string)$source . ' main_count=' . count($mainArr) . ' extra_count=' . count($extraArr));
         $__skaiAutoHiveResult = array('ok'=>false,'reason'=>'not_run');
         if (function_exists('SKAI_MLE_AUTO_HIVE_afterSave')) {
