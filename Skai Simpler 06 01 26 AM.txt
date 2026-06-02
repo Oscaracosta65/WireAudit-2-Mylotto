@@ -16477,10 +16477,13 @@ $labelInput = implode(' - ', $parts);
                                 $skaiBatchTargetDraw['target_draw_source'] = mb_substr($runTds, 0, 80, 'UTF-8');
                             }
                             $runTdrn = trim((string)($skaiRunSettings['target_draw_resolution_note'] ?? ''));
-                            $skaiBatchTargetDraw['target_draw_resolution_note'] = ($runTdrn !== '' ? ($runTdrn . ' | ') : '') . 'batch_json_loaded_for_run_order';
+                            $__skaiTraceBatchDateSeen = ($runTdd !== '' ? str_replace('-', '_', substr($runTdd, 0, 10)) : 'missing');
+                            $__skaiTraceLoadMode = $skaiCanLookupByBatchRun ? 'loaded_by_batch_id_run_order' : 'loaded_by_source_batch_run_id_fallback';
+                            $__skaiTraceMarker = 'actual_live_file_marker_2026_06_02|' . $__skaiTraceLoadMode . '|batch_json_date_seen_' . $__skaiTraceBatchDateSeen;
+                            $skaiBatchTargetDraw['target_draw_resolution_note'] = ($runTdrn !== '' ? ($runTdrn . ' | ') : '') . $__skaiTraceMarker;
                         }
                     } else {
-                        $skaiBatchTargetDraw['target_draw_resolution_note'] = 'batch_json_missing_for_run_order';
+                        $skaiBatchTargetDraw['target_draw_resolution_note'] = 'actual_live_file_marker_2026_06_02|loaded_by_batch_id_run_order|batch_json_date_seen_missing|batch_json_missing_for_run_order';
                     }
                 }
                 unset($skaiCanLookupByBatchRun, $skaiCanFallbackByRunId, $skaiRunQ, $skaiRunRow, $skaiRunJson, $skaiRunSettings, $runTdd, $runTda, $runTdtz, $runTdl, $runTds, $runTdrn, $runTdatTz, $runAtTz, $skaiRunTable, $skaiRunTables);
