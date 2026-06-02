@@ -123,22 +123,19 @@
   }
   function ensureBatchUrl(url, precision){
     if (!isSkaiUrl(url)) { return url || ''; }
-    url = addParam(url, 'mle_skai_batch', '1');
-    url = addParam(url, 'mle_skai_bridge', '1');
-    url = addParam(url, 'mle_global_batch', '1');
-    url = addParam(url, 'mle_batch_scope', 'exact_lottery');
     url = addParam(url, 'mle_command_source', 'mylottoexpert');
     url = addParam(url, 'source', 'mylottoexpert');
     if (precision) {
+      url = addParam(url, 'mle_skai_batch', '1');
+      url = addParam(url, 'mle_skai_bridge', '1');
+      url = addParam(url, 'mle_global_batch', '1');
+      url = addParam(url, 'mle_batch_scope', 'exact_lottery');
       url = addParam(url, 'mle_precision_batch', '1');
       url = addParam(url, 'mle_guided_mode', 'required');
       url = addParam(url, 'mle_required_action', 'precision_batch');
       url = addParam(url, 'open', 'precision_batch');
     } else {
       url = addParam(url, 'mle_guided_mode', 'global_learning');
-      url = addParam(url, 'mle_required_action', 'regular_9_batch');
-      url = addParam(url, 'mle_batch_type', 'regular_global_learning');
-      url = addParam(url, 'open', 'regular_9_batch');
       url = addParam(url, 'mle_single_mode', 'best_global_settings');
       url = addParam(url, 'mle_single_source', 'global_learning');
     }

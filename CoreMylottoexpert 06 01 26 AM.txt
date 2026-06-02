@@ -21025,15 +21025,8 @@ function mleAdvisoryResolveSkaiRegularRunUrl($db, $lotteryId)
 {
     $lotteryId = (int)$lotteryId;
     return mleAdvisoryBuildCanonicalSkaiLotteryUrl($db, $lotteryId, array(
-        'mle_skai_batch' => 1,
-        'mle_skai_bridge' => 1,
-        'mle_global_batch' => 1,
-        'mle_batch_scope' => 'exact_lottery',
         'mle_guided_mode' => 'global_learning',
-        'mle_required_action' => 'regular_9_batch',
         'mle_command_source' => 'mylottoexpert',
-        'mle_batch_type' => 'regular_global_learning',
-        'open' => 'regular_9_batch',
         'source' => 'mylottoexpert',
         'mle_single_mode' => 'best_global_settings',
         'mle_single_source' => 'global_learning'

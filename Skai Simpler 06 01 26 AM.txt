@@ -59776,6 +59776,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (window.location.search.indexOf('mle_skai_batch=1') === -1) { return null; }
       var urlBatchId = 0;
       try { urlBatchId = parseInt(new URLSearchParams(window.location.search).get('batch_id') || '0', 10) || 0; } catch (_) { urlBatchId = 0; }
+      if (urlBatchId <= 0) { return null; }
       var raw = sessionStorage.getItem('mle_precision_lock_batch_payload_v1') || localStorage.getItem('mle_precision_lock_batch_payload_v1') || '';
       var storagePayload = null;
       if (raw) {
