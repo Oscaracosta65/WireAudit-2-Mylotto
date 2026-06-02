@@ -59720,6 +59720,46 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     return '';
   }
+  function skaiMleGetQueryIntFromUrl(urlLike, key) {
+    var out = 0;
+    try {
+      if (!urlLike || !key) { return 0; }
+      var qs = String(urlLike).split('?')[1] || '';
+      if (!qs) { return 0; }
+      var hashPos = qs.indexOf('#');
+      if (hashPos >= 0) { qs = qs.substring(0, hashPos); }
+      var params = new URLSearchParams(qs);
+      out = parseInt(params.get(key) || '0', 10) || 0;
+    } catch (_) { out = 0; }
+    return out > 0 ? out : 0;
+  }
+  function skaiMleResolveBatchId(preferredId) {
+    var id = parseInt(preferredId || 0, 10) || 0;
+    if (id > 0) { return id; }
+    try {
+      id = parseInt((window.MLE_PRECISION_BATCH_CONTEXT && window.MLE_PRECISION_BATCH_CONTEXT.batch_id) || 0, 10) || 0;
+      if (id > 0) { return id; }
+    } catch (_) {}
+    try {
+      id = parseInt((window.SKAI_MLE_SERVER_BATCH_PAYLOAD && window.SKAI_MLE_SERVER_BATCH_PAYLOAD.batch_id) || 0, 10) || 0;
+      if (id > 0) { return id; }
+    } catch (_) {}
+    try {
+      id = parseInt((window.SKAI_MLE_SERVER_BATCH_STATUS && window.SKAI_MLE_SERVER_BATCH_STATUS.batch_id) || 0, 10) || 0;
+      if (id > 0) { return id; }
+    } catch (_) {}
+    id = parseInt(skaiMleGetUrlParam('batch_id') || '0', 10) || 0;
+    if (id > 0) { return id; }
+    try {
+      var saveForm = document.getElementById('skai-save-form') || document.getElementById('skai-ai-save-form');
+      if (saveForm) {
+        var formAction = String(saveForm.getAttribute('action') || '');
+        id = skaiMleGetQueryIntFromUrl(formAction, 'batch_id');
+        if (id > 0) { return id; }
+      }
+    } catch (_) {}
+    return 0;
+  }
   function skaiMleGuidedRequired() {
     return skaiMleGetUrlParam('mle_skai_batch') === '1'
       && (skaiMleGetUrlParam('mle_guided_mode') === 'required' || skaiMleGetUrlParam('mle_required_action') === 'precision_batch');
@@ -59952,8 +59992,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function loadMlePrecisionBatchCombos() {
     try {
       if (window.location.search.indexOf('mle_skai_batch=1') === -1) { return null; }
-      var urlBatchId = 0;
-      try { urlBatchId = parseInt(new URLSearchParams(window.location.search).get('batch_id') || '0', 10) || 0; } catch (_) { urlBatchId = 0; }
+      var urlBatchId = skaiMleResolveBatchId(0);
       if (urlBatchId <= 0) { return null; }
       var raw = sessionStorage.getItem('mle_precision_lock_batch_payload_v1') || localStorage.getItem('mle_precision_lock_batch_payload_v1') || '';
       var storagePayload = null;
@@ -61797,11 +61836,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var _mleBatch = (r.combo && r.combo.mleBatch) ? r.combo.mleBatch : null;
     var _ctxBatchId = (window.MLE_PRECISION_BATCH_CONTEXT && window.MLE_PRECISION_BATCH_CONTEXT.batch_id) ? window.MLE_PRECISION_BATCH_CONTEXT.batch_id : '';
-    var _batchIdResolved = parseInt((_mleBatch && _mleBatch.batch_id) || _ctxBatchId || _bfUrlParam('batch_id') || '0', 10) || 0;
+    var _batchIdResolved = skaiMleResolveBatchId((_mleBatch && _mleBatch.batch_id) || _ctxBatchId || 0);
     var _batchOrderResolved = parseInt((_mleBatch && _mleBatch.batch_run_order) || _payload['batch_save_index'] || (idx + 1), 10) || (idx + 1);
     if (_batchIdResolved > 0 || (r.combo && r.combo.mlePrecisionLock)) {
       _payload['origin_source'] = 'mle_precision_lock_batch';
       if (_batchIdResolved > 0) { _payload['source_batch_id'] = String(_batchIdResolved); }
+      if (_batchIdResolved > 0) { _payload['batch_id'] = String(_batchIdResolved); }
       if (_mleBatch && _mleBatch.batch_run_id) { _payload['source_batch_run_id'] = String(_mleBatch.batch_run_id); }
       _payload['source_batch_type'] = String((_mleBatch && _mleBatch.batch_type) || 'SKAI Precision Lock Batch');
       _payload['source_batch_run_order'] = String(_batchOrderResolved);
@@ -61852,6 +61892,16 @@ document.addEventListener('DOMContentLoaded', function () {
         if (doneCallback) { doneCallback({ ok: false, failedIndex: idx, detail: _detail }); }
       }
     };
+    if (skaiMleGuidedRequired() && !skaiMleGuidedCancelled() && _batchIdResolved <= 0) {
+      _onSaveComplete({
+        ok: false,
+        batch_save_mode: true,
+        batch_index: idx + 1,
+        reason: 'batch_context_missing',
+        message: 'Guided batch link is missing batch_id. Reopen SKAI from MyLottoExpert so this run can save with tracked batch context.'
+      });
+      return;
+    }
     _saveTimeout = setTimeout(function () {
       _onSaveComplete({ ok: false, batch_save_mode: true, batch_index: idx + 1, reason: 'save_timeout', message: 'No save confirmation received within 180 seconds.' });
     }, 180000);
