@@ -890,12 +890,16 @@ function lecron_find_candidates($db, $limit)
         $dateCol = 'target_draw_date';
         $where[] = $db->quoteName('target_draw_date') . ' IS NOT NULL';
         $where[] = $db->quoteName('target_draw_date') . ' <> ' . $db->quote('0000-00-00');
-        $where[] = 'DATE(' . $db->quoteName('target_draw_date') . ') <= ' . $db->quote(date('Y-m-d'));
+        // [[MLE_DRAW_TZ_FIX_2026]] Add a 1-day grace window so Eastern-timezone draws
+        // stored as YYYY-MM-DD are not excluded prematurely when the UTC server clock
+        // has already crossed midnight but the local draw date has not yet rolled over.
+        // target_draw_date is the lottery-local date; server UTC may be 1 day ahead.
+        $where[] = 'DATE(' . $db->quoteName('target_draw_date') . ') <= DATE_ADD(' . $db->quote(date('Y-m-d')) . ', INTERVAL 1 DAY)';
     } elseif (lecron_has_col($cols, 'next_draw_date')) {
         $dateCol = 'next_draw_date';
         $where[] = $db->quoteName('next_draw_date') . ' IS NOT NULL';
         $where[] = $db->quoteName('next_draw_date') . ' <> ' . $db->quote('0000-00-00');
-        $where[] = 'DATE(' . $db->quoteName('next_draw_date') . ') <= ' . $db->quote(date('Y-m-d'));
+        $where[] = 'DATE(' . $db->quoteName('next_draw_date') . ') <= DATE_ADD(' . $db->quote(date('Y-m-d')) . ', INTERVAL 1 DAY)';
     }
 
     $effectiveGameExpr = lecron_effective_game_sql($db, $cols);

@@ -1337,6 +1337,145 @@ function mylottoexpertBuildPredictionTarget(array $args)
     );
 }
 
+// [[MLE_CANONICAL_DRAW_TZ_RESOLVER_2026]]
+// Resolves the official draw timezone for a lottery/game, then computes the canonical
+// target_draw_date in that local timezone.  This is the authoritative function;
+// all batch-creation and SKAI-save paths must call this instead of bare strtotime/date().
+// Priority (highest to lowest):
+//   1. explicit lottery timezone_id in lottery config ($lotteryRow['timezone_id'] or draw_timezone)
+//   2. known draw-family default (Powerball / Mega Millions => America/New_York)
+//   3. site/app configured timezone  (last resort, recorded in source_reason)
+// Browser timezone and user profile timezone are intentionally excluded.
+function mylottoexpertResolveOfficialDrawTarget($lotteryId, $gameId, $inputDateOrDrawAt = null)
+{
+    $lotteryId = (int)$lotteryId;
+    $gameId    = trim((string)$gameId);
+
+    // --- Step 1: resolve lottery timezone from config / known families ---
+    $resolvedTz     = '';
+    $sourceReason   = '';
+    $resolutionNote = '';
+
+    // 1a. Try lottery row from DB
+    try {
+        $db  = \Joomla\CMS\Factory::getDbo();
+        $q   = $db->getQuery(true)
+            ->select($db->quoteName(array('game_id', 'timezone_id', 'draw_timezone', 'game_name')))
+            ->from($db->quoteName('#__mle_lotteries'))
+            ->where($db->quoteName('id') . ' = ' . $lotteryId);
+        $db->setQuery($q, 0, 1);
+        $lotRow = $db->loadAssoc();
+        if (is_array($lotRow)) {
+            $cfgTz = trim((string)($lotRow['timezone_id'] ?? $lotRow['draw_timezone'] ?? ''));
+            if ($cfgTz !== '') {
+                $resolvedTz     = $cfgTz;
+                $sourceReason   = 'lottery_config_timezone_id';
+                $resolutionNote = 'Resolved from #__mle_lotteries timezone_id for lottery_id=' . $lotteryId;
+            }
+        }
+    } catch (\Throwable $__) {}
+
+    // 1b. Known draw-family defaults (case-insensitive game_id prefix match)
+    if ($resolvedTz === '') {
+        $gidUpper = strtoupper($gameId);
+        if (
+            strncmp($gidUpper, 'PB', 2) === 0 ||
+            strncmp($gidUpper, 'POWERBALL', 9) === 0 ||
+            strncmp($gidUpper, 'MEGAMILLIONS', 12) === 0 ||
+            strncmp($gidUpper, 'MEGA_MILLIONS', 13) === 0 ||
+            strncmp($gidUpper, 'MM', 2) === 0
+        ) {
+            $resolvedTz     = 'America/New_York';
+            $sourceReason   = 'known_draw_family_default';
+            $resolutionNote = 'Powerball/Mega Millions family always draws in America/New_York; game_id=' . $gameId;
+        }
+    }
+
+    // 1c. Site timezone as last fallback
+    if ($resolvedTz === '') {
+        try {
+            $resolvedTz = (string)\Joomla\CMS\Factory::getConfig()->get('offset', 'America/New_York');
+        } catch (\Throwable $__) {
+            $resolvedTz = 'America/New_York';
+        }
+        $sourceReason   = 'site_tz_fallback';
+        $resolutionNote = 'No lottery-specific timezone found; fell back to site offset. Check #__mle_lotteries.timezone_id for lottery_id=' . $lotteryId;
+    }
+
+    // Validate the resolved timezone string
+    try {
+        new \DateTimeZone($resolvedTz);
+    } catch (\Throwable $__) {
+        $resolvedTz     = 'America/New_York';
+        $sourceReason   = 'site_tz_fallback_invalid';
+        $resolutionNote = 'Resolved timezone was invalid; hard-fallback to America/New_York. lottery_id=' . $lotteryId;
+    }
+
+    // --- Step 2: compute target_draw_date in the lottery-local timezone ---
+    $targetDrawDate  = '';
+    $targetDrawAt    = null;
+    $targetDrawLabel = '';
+
+    if ($inputDateOrDrawAt !== null && trim((string)$inputDateOrDrawAt) !== '') {
+        $raw = trim((string)$inputDateOrDrawAt);
+        // If already a bare Y-m-d date, accept it directly without UTC re-interpretation
+        if (preg_match('/^(\d{4}-\d{2}-\d{2})$/', $raw, $m)) {
+            $targetDrawDate = $m[1];
+            $targetDrawAt   = null;
+        } else {
+            // Datetime string: parse in the lottery timezone to extract the local date
+            try {
+                $dtObj = new \Joomla\CMS\Date\Date($raw, $resolvedTz);
+                // format(true) returns local time in the given timezone
+                $targetDrawDate = $dtObj->format('Y-m-d', true);
+                $targetDrawAt   = $dtObj->toSql();
+            } catch (\Throwable $__) {
+                // Fallback: slice Y-m-d portion as-is
+                $targetDrawDate = substr($raw, 0, 10);
+                $targetDrawAt   = null;
+            }
+        }
+    } else {
+        // No input date: use today in the lottery-local timezone
+        try {
+            $nowLocal       = new \Joomla\CMS\Date\Date('now', $resolvedTz);
+            $targetDrawDate = $nowLocal->format('Y-m-d', true);
+        } catch (\Throwable $__) {
+            $targetDrawDate = date('Y-m-d');
+        }
+    }
+
+    // Human-readable label with timezone abbreviation, e.g. "Jun 3, 2026 ET"
+    try {
+        $dtLabelObj  = new \Joomla\CMS\Date\Date(($targetDrawAt !== null ? $targetDrawAt : $targetDrawDate), $resolvedTz);
+        $tzAbbr      = (new \DateTimeZone($resolvedTz))->getName();
+        // Shorten well-known IANA names to display abbreviations
+        $tzAbbrMap   = array(
+            'America/New_York'    => 'ET',
+            'America/Chicago'     => 'CT',
+            'America/Denver'      => 'MT',
+            'America/Phoenix'     => 'MT',
+            'America/Los_Angeles' => 'PT',
+            'America/Anchorage'   => 'AKT',
+            'Pacific/Honolulu'    => 'HT',
+        );
+        $tzDisplay   = isset($tzAbbrMap[$resolvedTz]) ? $tzAbbrMap[$resolvedTz] : $tzAbbr;
+        $targetDrawLabel = 'Draw: ' . $dtLabelObj->format('M j, Y', true) . ' ' . $tzDisplay;
+    } catch (\Throwable $__) {
+        $targetDrawLabel = 'Draw: ' . $targetDrawDate;
+    }
+
+    return array(
+        'target_draw_date'           => $targetDrawDate,
+        'target_draw_at'             => $targetDrawAt,
+        'target_draw_timezone'       => $resolvedTz,
+        'target_draw_label'          => $targetDrawLabel,
+        'source_reason'              => $sourceReason,
+        'target_draw_source'         => 'lottery_timezone_resolver',
+        'target_draw_resolution_note' => $resolutionNote,
+    );
+}
+
 function mylottoexpertResolvePredictionTargetMeta($row)
 {
     $predictionTargetId = trim((string)(mylottoexpertResolveRowValue($row, 'prediction_target_id') ?? ''));
@@ -1349,13 +1488,17 @@ function mylottoexpertResolvePredictionTargetMeta($row)
         $targetDrawDate = '';
     }
     if ($targetDrawDate !== '') {
-        $ts = strtotime($targetDrawDate);
-        if ($ts !== false && $ts > 0) {
-            $targetDrawDate = date('Y-m-d', $ts);
+        // [[MLE_DRAW_TZ_FIX_2026]] Extract the Y-m-d portion directly without UTC
+        // re-interpretation.  strtotime() + date('Y-m-d') is NOT used here because
+        // a datetime string such as "2026-06-04 04:00:00 UTC" would yield June 4
+        // when the lottery-local draw date is June 3.  Slicing the leading 10 chars
+        // is safe for both "YYYY-MM-DD" and "YYYY-MM-DD HH:MM:SS" input formats.
+        if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $targetDrawDate, $__m)) {
+            $targetDrawDate = $__m[1];
         } else {
-
             $targetDrawDate = '';
         }
+        unset($__m);
     }
     $targetDrawAt = trim((string)(mylottoexpertResolveRowValue($row, 'target_draw_at') ?? mylottoexpertResolveRowValue($row, 'next_draw_at') ?? ''));
     $targetDrawSession = trim((string)(mylottoexpertResolveRowValue($row, 'target_draw_session') ?? mylottoexpertResolveRowValue($row, 'draw_session') ?? ''));
@@ -26414,6 +26557,20 @@ if ($__mleAction === 'create_skai_batch') {
         $__batchResearchAssignmentId = mylottoexpertV97CreateResearchAssignment($db, $__batchResearchQueueId, $workspaceUserId, $__batchLotteryId, $__batchGameIdForResearch, $__batchHeaderId, $__batchNow);
         $__batchSource = (string)($__batchTopMethod['method'] ?? 'skai');
         $__batchRunPhase = ($__batchRequestedPlan === 'horizon') ? 'horizon' : (($__batchRequestedPlan === 'regular_9_batch') ? 'regular' : 'settings');
+
+        // [[MLE_CANONICAL_DRAW_TZ_RESOLVER_2026]] Resolve target_draw_date once using the
+        // canonical lottery-timezone resolver so that all 9 batch runs share the same
+        // authoritative draw date and traceability fields.
+        $__batchDrawTarget = function_exists('mylottoexpertResolveOfficialDrawTarget')
+            ? mylottoexpertResolveOfficialDrawTarget($__batchLotteryId, $__batchGameIdForResearch, $__batchTargetDrawDate !== '' ? $__batchTargetDrawDate : null)
+            : array('target_draw_date' => $__batchTargetDrawDate, 'target_draw_timezone' => 'America/New_York', 'target_draw_source' => 'fallback', 'target_draw_resolution_note' => '', 'target_draw_label' => $__batchTargetDrawDate);
+        // Prefer the already-validated POST/row date; only override if it was empty
+        if ($__batchTargetDrawDate !== '') {
+            $__batchDrawTarget['target_draw_date'] = $__batchTargetDrawDate;
+        } else {
+            $__batchTargetDrawDate = (string)($__batchDrawTarget['target_draw_date'] ?? '');
+        }
+
         foreach ($__batchRunLabels as $__batchRunIdx => $__batchRunLabel) {
             $__batchRunOrder = $__batchRunIdx + 1;
             $__batchIsControl = ($__batchRunOrder === 1) ? 1 : 0;
@@ -26444,6 +26601,10 @@ if ($__mleAction === 'create_skai_batch') {
             $__batchRunSettings['lottery_id'] = (int)$__batchLotteryId;
             $__batchRunSettings['lottery_name'] = (string)$__batchLotteryName;
             $__batchRunSettings['target_draw_date'] = (string)$__batchTargetDrawDate;
+            $__batchRunSettings['target_draw_timezone']        = (string)($__batchDrawTarget['target_draw_timezone']        ?? 'America/New_York');
+            $__batchRunSettings['target_draw_label']           = (string)($__batchDrawTarget['target_draw_label']           ?? $__batchTargetDrawDate);
+            $__batchRunSettings['target_draw_source']          = (string)($__batchDrawTarget['target_draw_source']          ?? 'lottery_timezone_resolver');
+            $__batchRunSettings['target_draw_resolution_note'] = (string)($__batchDrawTarget['target_draw_resolution_note'] ?? '');
             $__batchRunSettings['source'] = 'mylottoexpert';
             $__batchRunSettings['batch_plan'] = (string)$__batchRequestedPlan;
             $__batchRunSettings['mle_required_action'] = (string)$__batchRequestedPlan;
@@ -26835,14 +26996,32 @@ if ($__mleAction === 'run_skai_precision_lock_batch') {
         $settings['skai_top_n_combos'] = max(5, (int)($settings['skai_top_n_combos'] ?? 5));
         $settings['top_n_combos'] = max(5, (int)($settings['top_n_combos'] ?? 5));
 
-        $drawDateRaw = trim((string)($predictionPayload['target_draw_date'] ?? $predictionPayload['next_draw_date'] ?? date('Y-m-d')));
-        $drawTs = strtotime($drawDateRaw);
-        $drawDate = $drawTs ? date('Y-m-d', $drawTs) : date('Y-m-d');
+        // [[MLE_DRAW_TZ_FIX_2026]] Extract draw date without UTC re-interpretation.
+        // strtotime + date('Y-m-d') is replaced by regex extraction to prevent midnight
+        // rollover shifting the date when the server clock is UTC.
+        $drawDateRaw = trim((string)($predictionPayload['target_draw_date'] ?? $predictionPayload['next_draw_date'] ?? ''));
+        if ($drawDateRaw !== '' && preg_match('/^(\d{4}-\d{2}-\d{2})/', $drawDateRaw, $__ddm)) {
+            $drawDate = $__ddm[1];
+        } else {
+            // Fallback: resolve current date in the lottery-local timezone
+            $__drawFallback = function_exists('mylottoexpertResolveOfficialDrawTarget')
+                ? mylottoexpertResolveOfficialDrawTarget((int)$lotteryId, (string)($lotteryRow['game_id'] ?? ''))
+                : array('target_draw_date' => date('Y-m-d'));
+            $drawDate = (string)($__drawFallback['target_draw_date'] ?? date('Y-m-d'));
+            unset($__drawFallback);
+        }
+        unset($__ddm);
         $drawAt = trim((string)($predictionPayload['target_draw_at'] ?? ''));
         $drawSession = mylottoexpertNormalizeTargetSession((string)($predictionPayload['target_draw_session'] ?? ''));
         $family = $__isDailyBatchOutput ? 'daily' : trim((string)($predictionPayload['target_prediction_family'] ?? 'regular'));
         $ptype = trim((string)($predictionPayload['target_prediction_type'] ?? $family));
         if ($__isDailyBatchOutput && $ptype === '') { $ptype = 'daily'; }
+
+        // Resolve the authoritative lottery timezone for this game
+        $__batchSaveDrawTarget = function_exists('mylottoexpertResolveOfficialDrawTarget')
+            ? mylottoexpertResolveOfficialDrawTarget((int)$lotteryId, (string)($lotteryRow['game_id'] ?? ''), $drawDate)
+            : array('target_draw_timezone' => 'America/New_York', 'target_draw_source' => 'fallback', 'target_draw_resolution_note' => '');
+        $__batchSaveTz = (string)($__batchSaveDrawTarget['target_draw_timezone'] ?? 'America/New_York');
 
         $target = mylottoexpertBuildPredictionTarget(array(
             'game_id' => (string)($lotteryRow['game_id'] ?? ''),
@@ -26850,7 +27029,7 @@ if ($__mleAction === 'run_skai_precision_lock_batch') {
             'draw_date' => $drawDate,
             'draw_at' => $drawAt,
             'draw_session' => $drawSession,
-            'timezone_id' => 'America/New_York',
+            'timezone_id' => $__batchSaveTz,
             'prediction_family' => $family,
             'prediction_type' => $ptype,
             'pick_size' => count($mainNumbers),

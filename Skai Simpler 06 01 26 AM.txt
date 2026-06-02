@@ -16309,30 +16309,52 @@ $labelInput = implode(' - ', $parts);
             $label   = $labelInput !== '' ? $labelInput : ('SKAI - ' . $lotName . ' - ' . $dateNow);
         }
 
-        // Compute timestamps with timezone awareness
-        // Priority: Joomla user profile timezone -> site timezone -> fallback
+        // [[MLE_DRAW_TZ_FIX_2026]] Compute timestamps with lottery-timezone-aware priority.
+        // Priority for DRAW TIMEZONE (target_draw_date / target_draw_at / target_timezone_id):
+        //   1. Lottery-specific timezone from lotteryConfig or known draw-family defaults
+        //   2. Site-configured timezone
+        //   (User profile timezone is intentionally NOT used for draw-date authority)
+        // $siteTz is still used for "now" timestamps (utc_epoch, user_local_datetime) and
+        // for the cosmetic label only.
+
+        // --- Resolve lottery draw timezone ---
+        $lotteryTz = '';
+        // 1a. From loaded lotteryConfig
+        if (empty($lotteryTz)) {
+            $lotteryTz = trim((string)($lotteryConfig['timezone_id'] ?? $lotteryConfig['draw_timezone'] ?? ''));
+        }
+        // 1b. Known draw-family defaults (game_id prefix match)
+        if (empty($lotteryTz) && isset($selectedGameId)) {
+            $__gidU = strtoupper((string)$selectedGameId);
+            if (strncmp($__gidU, 'PB', 2) === 0 || strncmp($__gidU, 'POWERBALL', 9) === 0 ||
+                strncmp($__gidU, 'MEGAMILLIONS', 12) === 0 || strncmp($__gidU, 'MEGA_MILLIONS', 13) === 0 ||
+                strncmp($__gidU, 'MM', 2) === 0) {
+                $lotteryTz = 'America/New_York';
+            }
+            unset($__gidU);
+        }
+        // Validate lottery timezone
+        if ($lotteryTz !== '') {
+            try { new \DateTimeZone($lotteryTz); } catch (\Throwable $__) { $lotteryTz = ''; }
+        }
+
+        // --- Resolve site timezone (for "now" display timestamps only) ---
         $userTz = null;
         try {
-            $userParams = $user->getParameters();
-            $userTz = $userParams->get('timezone', null);
-        } catch (\Throwable $__) {}
-        
-        if (empty($userTz)) {
-            try {
-                $siteConfig = Factory::getConfig();
-                $userTz = $siteConfig->get('offset', 'America/New_York');
-            } catch (\Throwable $__) {
-                $userTz = 'America/New_York';
-            }
+            $siteConfig = Factory::getConfig();
+            $userTz = $siteConfig->get('offset', 'America/New_York');
+        } catch (\Throwable $__) {
+            $userTz = 'America/New_York';
         }
-        
-        // Validate timezone identifier
+        // Validate site timezone
         try {
             $testTz = new \DateTimeZone($userTz);
         } catch (\Throwable $__) {
             $userTz = 'America/New_York';
         }
-        
+
+        // Use lottery timezone for draw-date calculations; site timezone for display timestamps
+        $drawTz = ($lotteryTz !== '') ? $lotteryTz : $userTz;
         $siteTz = $userTz;
         $nowDate = new Date('now', $siteTz);
         $nowSql = $nowDate->toSql();
@@ -16343,7 +16365,7 @@ $labelInput = implode(' - ', $parts);
         // Store user local datetime string (for dashboard display)
         $userLocalDatetime = $nowDate->format('Y-m-d H:i:s', true);
         
-        // Store timezone identifier (IANA format)
+        // Store timezone identifier (IANA format) - records site TZ for dashboard
         $timezoneId = $siteTz;
 
         // --- Sanitize lengths (defensive; no schema changes) ---
@@ -16384,13 +16406,26 @@ $labelInput = implode(' - ', $parts);
         $ndd = $skaiDbMeta['next_draw_date'] ?? null;
         $nda = $skaiDbMeta['next_draw_at']   ?? null;
 
-        // Parse next-draw timestamps using site TZ, fall back to config if meta missing
+        // [[MLE_DRAW_TZ_FIX_2026]] Parse next-draw timestamps using LOTTERY timezone ($drawTz),
+        // not site/user timezone ($siteTz).  This prevents midnight-UTC rollover from shifting
+        // the draw date forward when the server is UTC but the draw occurs in Eastern time.
         try {
             if ($nextDrawDateSql === null && !empty($ndd)) {
-                // Store as DATE in Y-m-d format for next_draw_date
-                $nextDrawDateSql = (new Date($ndd, $siteTz))->format('Y-m-d', true);
+                // Extract Y-m-d in the lottery-local timezone
+                if (preg_match('/^(\d{4}-\d{2}-\d{2})/', (string)$ndd, $__nm)) {
+                    $nextDrawDateSql = $__nm[1];
+                } else {
+                    $nextDrawDateSql = (new Date($ndd, $drawTz))->format('Y-m-d', true);
+                }
+                unset($__nm);
             } elseif ($nextDrawDateSql === null && !empty($lotteryConfig['next_draw_date'])) {
-                $nextDrawDateSql = (new Date($lotteryConfig['next_draw_date'], $siteTz))->format('Y-m-d', true);
+                $__cfgNdd = (string)$lotteryConfig['next_draw_date'];
+                if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $__cfgNdd, $__nm)) {
+                    $nextDrawDateSql = $__nm[1];
+                } else {
+                    $nextDrawDateSql = (new Date($__cfgNdd, $drawTz))->format('Y-m-d', true);
+                }
+                unset($__cfgNdd, $__nm);
             }
         } catch (\Throwable $e) { /* ignore; leave as NULL */ }
 
@@ -16399,7 +16434,12 @@ $labelInput = implode(' - ', $parts);
             try {
                 $fallbackNdd = getNextDrawDate($selectedGameId, $db, $dbCol);
                 if (!empty($fallbackNdd)) {
-                    $nextDrawDateSql = (new Date($fallbackNdd, $siteTz))->format('Y-m-d', true);
+                    if (preg_match('/^(\d{4}-\d{2}-\d{2})/', (string)$fallbackNdd, $__nm)) {
+                        $nextDrawDateSql = $__nm[1];
+                    } else {
+                        $nextDrawDateSql = (new Date($fallbackNdd, $drawTz))->format('Y-m-d', true);
+                    }
+                    unset($__nm);
                 }
             } catch (\Throwable $__) { /* ignore */ }
         }
@@ -16410,10 +16450,10 @@ $labelInput = implode(' - ', $parts);
 
         try {
             if (!empty($nda)) {
-                // Full timestamp for next_draw_at (DATETIME column)
-                $nextDrawAtSql = (new Date($nda, $siteTz))->toSql();
+                // Full timestamp for next_draw_at (DATETIME column) - use lottery TZ
+                $nextDrawAtSql = (new Date($nda, $drawTz))->toSql();
             } elseif (!empty($lotteryConfig['next_draw_at'])) {
-                $nextDrawAtSql = (new Date($lotteryConfig['next_draw_at'], $siteTz))->toSql();
+                $nextDrawAtSql = (new Date($lotteryConfig['next_draw_at'], $drawTz))->toSql();
             }
         } catch (\Throwable $e) { /* ignore; leave as NULL */ }
 
@@ -16427,6 +16467,46 @@ $labelInput = implode(' - ', $parts);
         }
         if ($drawSessionSql === '') { $drawSessionSql = null; }
 
+        // [[MLE_DRAW_TZ_FIX_2026]] Preserve target_draw_date and target_draw_timezone from
+        // the originating batch run full_settings_json when this save is part of an MLE
+        // precision-lock batch.  This prevents SKAI's save path from recalculating
+        // target_draw_date through user/site timezone.
+        $__skaiPreBatchRunId = (int)$in->getInt('source_batch_run_id', 0);
+        if ($__skaiPreBatchRunId > 0) {
+            try {
+                $__skaiRunTables = array_map('strtolower', array_keys((array)$db->getTableList()));
+                $__skaiRunTable  = strtolower(str_replace('#__', $db->getPrefix(), '#__mle_skai_batch_run'));
+                if (in_array($__skaiRunTable, $__skaiRunTables, true)) {
+                    $__skaiRunQ = $db->getQuery(true)
+                        ->select($db->quoteName('full_settings_json'))
+                        ->from($db->quoteName('#__mle_skai_batch_run'))
+                        ->where($db->quoteName('id') . ' = ' . $__skaiPreBatchRunId);
+                    $db->setQuery($__skaiRunQ, 0, 1);
+                    $__skaiRunJson = (string)($db->loadResult() ?? '');
+                    if ($__skaiRunJson !== '') {
+                        $__skaiRunSettings = json_decode($__skaiRunJson, true);
+                        if (json_last_error() === JSON_ERROR_NONE && is_array($__skaiRunSettings)) {
+                            $__runTdd = trim((string)($__skaiRunSettings['target_draw_date'] ?? ''));
+                            $__runTdtz = trim((string)($__skaiRunSettings['target_draw_timezone'] ?? ''));
+                            // Preserve date exactly as stored in batch - no re-interpretation
+                            if ($__runTdd !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $__runTdd)) {
+                                $nextDrawDateSql = $__runTdd;
+                            }
+                            // Prefer batch timezone over the locally resolved lottery timezone
+                            if ($__runTdtz !== '') {
+                                try {
+                                    new \DateTimeZone($__runTdtz);
+                                    $drawTz = $__runTdtz;
+                                } catch (\Throwable $__) {}
+                            }
+                        }
+                    }
+                    unset($__skaiRunQ, $__skaiRunJson, $__skaiRunSettings, $__runTdd, $__runTdtz, $__skaiRunTable, $__skaiRunTables);
+                }
+            } catch (\Throwable $__) { /* ignore; continue with locally resolved values */ }
+        }
+        unset($__skaiPreBatchRunId);
+
         // Canonical immutable draw target binding for this saved prediction.
         $predictionTarget = skaiBuildPredictionTarget([
             'game_id'            => $saveGameId !== '' ? $saveGameId : (string)$selectedGameId,
@@ -16434,7 +16514,7 @@ $labelInput = implode(' - ', $parts);
             'draw_date'          => (string)($nextDrawDateSql ?? ''),
             'draw_at'            => $nextDrawAtSql,
             'draw_session'       => $drawSessionSql,
-            'timezone_id'        => $siteTz,
+            'timezone_id'        => $drawTz,
             'prediction_family'  => $isDailyGamePosted ? 'daily' : 'regular',
             'prediction_type'    => $__predType ?? ($isDailyGamePosted ? 'daily' : 'regular'),
             'pick_size'          => $isDailyGamePosted ? (int)((isset($__dailyPickSizeRow) && $__dailyPickSizeRow !== null) ? $__dailyPickSizeRow : 0) : (int)count($mainArr),
@@ -16807,6 +16887,10 @@ $row = (object) [
     'target_draw_at'      => ($predictionTarget['target_draw_at'] ?? null),
     'target_draw_session' => ($predictionTarget['target_draw_session'] ?? null),
     'target_timezone_id'  => ($predictionTarget['target_timezone_id'] ?? null),
+    // [[MLE_DRAW_TZ_FIX_2026]] Traceability fields - written to row when columns exist
+    'target_draw_timezone'        => isset($drawTz) ? $drawTz : ($predictionTarget['target_timezone_id'] ?? null),
+    'target_draw_source'          => 'lottery_timezone_resolver',
+    'target_draw_resolution_note' => isset($lotteryTz) && $lotteryTz !== '' ? 'resolved_from_lottery_config' : (isset($drawTz) ? 'resolved_from_draw_family_or_site_fallback' : 'unknown'),
     'target_prediction_family' => ($predictionTarget['target_prediction_family'] ?? null),
     'target_prediction_type' => ($predictionTarget['target_prediction_type'] ?? null),
     'target_pick_size'    => ($predictionTarget['target_pick_size'] ?? null),
