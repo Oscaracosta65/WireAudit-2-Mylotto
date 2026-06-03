@@ -261,6 +261,24 @@ if ($isDebug) {
 }
 
 ini_set('error_log', JPATH_ADMINISTRATOR . '/logs/skai_error.log');
+if (!function_exists('skai_safe_save_error_log')) {
+    function skai_safe_save_error_log($message) {
+        $msg = preg_replace('/[\x00-\x1F\x7F]/', ' ', (string)$message);
+        $msg = trim(preg_replace('/\s+/', ' ', $msg));
+        if ($msg === '') { return; }
+        $line = '[' . gmdate('Y-m-d H:i:s') . ' UTC] ' . substr($msg, 0, 3000) . PHP_EOL;
+        $path = JPATH_ADMINISTRATOR . '/logs/skai_save_ajax.log';
+        try {
+            $dir = dirname($path);
+            if (!is_dir($dir)) { @mkdir($dir, 0755, true); }
+            if (@file_put_contents($path, $line, FILE_APPEND | LOCK_EX) === false) {
+                error_log('[SKAI SAVE LOG FALLBACK] ' . substr($msg, 0, 1000));
+            }
+        } catch (\Throwable $_skaiLogEx) {
+            error_log('[SKAI SAVE LOG EXCEPTION] ' . $_skaiLogEx->getMessage() . ' | ' . substr($msg, 0, 800));
+        }
+    }
+}
 
 // [[SKAI_RUNTIME_WARNING_GUARDS_2026_05_15]]
 // Safe defaults for paths that can be reached before optional state blocks assign values.
@@ -676,14 +694,18 @@ if ($skaiMaintenanceBlockCurrentUser && $in->getMethod() === 'POST') {
         || ((string)$in->getString('skai_action', '') !== '')
         || ((int)$in->getInt('batch_save_mode', 0) === 1);
     if ($isSkaiMutation) {
+        while (ob_get_level() > 0) { @ob_end_clean(); }
         try {
             $app->setHeader('Content-Type', 'application/json; charset=utf-8', true);
+            $app->setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0', true);
             $app->sendHeaders();
         } catch (\Throwable $_skaiMaintHeaderEx) {
             @header('Content-Type: application/json; charset=utf-8');
+            @header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
         }
         echo json_encode(array(
             'ok' => false,
+            'reason' => 'maintenance_active',
             'maintenance' => true,
             'error' => 'skai_maintenance_active',
             'message' => $skaiMaintenanceMessage
@@ -17645,6 +17667,12 @@ $row = (object) [
                     'batch_label' => $skaiBatchSaveLabel
                 ]);
             }
+            if (!empty($skaiIsXhrSaveRequest) && !empty($skaiRespondSaveJson) && is_callable($skaiRespondSaveJson)) {
+                $skaiRespondSaveJson(false, [
+                    'reason' => 'transaction_catch',
+                    'message' => 'Save failed. Please try again.'
+                ]);
+            }
             if (!$skaiIsXhrSaveRequest) {
                 if (!empty($isDebug)) {
                     $app->enqueueMessage('Save failed (rolled back). Please try again.', 'error');
@@ -17858,6 +17886,8 @@ $row = (object) [
         if ($skaiBatchSaveMode) {
             skai_debug_log('[SKAI BATCH SAVE SUCCESS] idx=' . $skaiBatchSaveIndex . ' total=' . $skaiBatchSaveTotal . ' label=' . $skaiBatchSaveLabel . ' row_id=' . (int) $newId);
             $skaiRespondBatchJson(true, [
+                'reason' => 'saved',
+                'message' => 'Saved to your dashboard.',
                 'row_id' => (int) $newId,
                 'hive_contract_status' => (string)($skaiHiveContractStatus ?? ''),
                 'hive_intake_mode' => (string)($skaiHiveIntakeMode ?? ''),
@@ -17885,7 +17915,7 @@ $row = (object) [
                 header('Content-Type: application/json; charset=utf-8');
                 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
             }
-            echo json_encode(['ok' => true, 'row_id' => (int)$newId, 'hive_contract_status' => (string)($skaiHiveContractStatus ?? ''), 'hive_intake_mode' => (string)($skaiHiveIntakeMode ?? ''), 'auto_hive_intake' => !empty($__skaiAutoHiveResult['ok']) ? 1 : 0, 'auto_hive_queue_id' => (int)($__skaiAutoHiveResult['queue_id'] ?? 0), 'auto_hive_assignment_id' => (int)($__skaiAutoHiveResult['assignment_id'] ?? 0), 'auto_hive_settings_fingerprint' => (string)($__skaiAutoHiveResult['settings_fingerprint'] ?? '')], JSON_UNESCAPED_SLASHES);
+            echo json_encode(['ok' => true, 'reason' => 'saved', 'message' => 'Saved to your dashboard.', 'row_id' => (int)$newId, 'hive_contract_status' => (string)($skaiHiveContractStatus ?? ''), 'hive_intake_mode' => (string)($skaiHiveIntakeMode ?? ''), 'auto_hive_intake' => !empty($__skaiAutoHiveResult['ok']) ? 1 : 0, 'auto_hive_queue_id' => (int)($__skaiAutoHiveResult['queue_id'] ?? 0), 'auto_hive_assignment_id' => (int)($__skaiAutoHiveResult['assignment_id'] ?? 0), 'auto_hive_settings_fingerprint' => (string)($__skaiAutoHiveResult['settings_fingerprint'] ?? '')], JSON_UNESCAPED_SLASHES);
             exit(0);
         }
 
@@ -17947,6 +17977,7 @@ $row = (object) [
         }
     }
 } catch (\Throwable $e) {
+    skai_safe_save_error_log('[SKAI SAVE FATAL] ' . $e->getMessage());
     if (!empty($skaiBatchSaveMode) && !empty($skaiRespondBatchJson) && is_callable($skaiRespondBatchJson)) {
         skai_debug_log('[SKAI BATCH SAVE FATAL] idx=' . (int) $skaiBatchSaveIndex . ' total=' . (int) $skaiBatchSaveTotal);
         $skaiRespondBatchJson(false, [
@@ -17955,6 +17986,12 @@ $row = (object) [
             'batch_index' => (int) $skaiBatchSaveIndex,
             'batch_total' => (int) $skaiBatchSaveTotal,
             'batch_label' => (string) $skaiBatchSaveLabel
+        ]);
+    }
+    if (!empty($skaiIsXhrSaveRequest) && !empty($skaiRespondSaveJson) && is_callable($skaiRespondSaveJson)) {
+        $skaiRespondSaveJson(false, [
+            'reason' => 'save_fatal',
+            'message' => 'An unexpected error occurred. Please try again.'
         ]);
     }
     // [FIX-BATCH] Raw-$_POST fallback: if $skaiBatchSaveMode / $skaiRespondBatchJson were not
