@@ -16567,6 +16567,8 @@ $labelInput = implode(' - ', $parts);
         $skaiSourceBatchRunOrderForTarget = (int)$in->getInt('source_batch_run_order', 0);
         $skaiPostedBatchIdForTarget = (int)$in->getInt('batch_id', 0);
         $skaiPostedBatchIndexForTarget = (int)$in->getInt('batch_save_index', 0);
+        $skaiCachedBatchHeaderRow = null;
+        $skaiCachedBatchRunRow = null;
         if ($skaiPostedBatchIndexForTarget <= 0) { $skaiPostedBatchIndexForTarget = (int)$in->getInt('batch_index', 0); }
         $skaiPostedBatchContextForTarget = ((int)$in->getInt('mle_skai_batch', 0) === 1);
         if ($skaiSourceBatchIdForTarget <= 0 && $skaiPostedBatchContextForTarget && $skaiPostedBatchIdForTarget > 0) {
@@ -16586,13 +16588,14 @@ $labelInput = implode(' - ', $parts);
             try {
                 if ($skaiSourceBatchIdForTarget > 0) {
                     $skaiHeaderOwnerQ = $db->getQuery(true)
-                        ->select($db->quoteName('id'))
+                        ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
                         ->from($db->quoteName('#__mle_skai_batch_header'))
                         ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchIdForTarget)
                         ->where($db->quoteName('user_id') . ' = ' . (int)$user->id)
                         ->setLimit(1);
                     $db->setQuery($skaiHeaderOwnerQ);
-                    $skaiHeaderOwnerId = (int)$db->loadResult();
+                    $skaiCachedBatchHeaderRow = $db->loadAssoc();
+                    $skaiHeaderOwnerId = (int)($skaiCachedBatchHeaderRow['id'] ?? 0);
                     if ($skaiHeaderOwnerId <= 0) {
                         $skaiCanLookupByBatchRun = false;
                         $skaiCanFallbackByRunId = false;
@@ -16609,7 +16612,7 @@ $labelInput = implode(' - ', $parts);
                 $skaiRunTable  = strtolower(str_replace('#__', $db->getPrefix(), '#__mle_skai_batch_run'));
                 if (in_array($skaiRunTable, $skaiRunTables, true)) {
                     $skaiRunQ = $db->getQuery(true)
-                        ->select(array($db->quoteName('full_settings_json'), $db->quoteName('batch_id')))
+                        ->select(array($db->quoteName('id'), $db->quoteName('full_settings_json'), $db->quoteName('batch_id'), $db->quoteName('run_order')))
                         ->from($db->quoteName('#__mle_skai_batch_run'));
                     if ($skaiCanLookupByBatchRun) {
                         $skaiRunQ
@@ -16621,6 +16624,7 @@ $labelInput = implode(' - ', $parts);
                     }
                     $db->setQuery($skaiRunQ, 0, 1);
                     $skaiRunRow = $db->loadAssoc();
+                    $skaiCachedBatchRunRow = is_array($skaiRunRow) ? $skaiRunRow : null;
                     $skaiRunJson = ($skaiRunRow !== null) ? (string)($skaiRunRow['full_settings_json'] ?? '') : '';
                     // Secondary fallback: verify the loaded row belongs to the declared source batch
                     // when source_batch_id is known. Discard if batch_id does not match.
@@ -16847,14 +16851,20 @@ if (!$skaiBatchSaveMode && $skaiHasRealBatchIdentity) {
     $skaiSavedLotteryIdForDemotion = (int)$lotteryId;
     $skaiTargetLotteryIdForDemotion = (int)($predictionTarget['target_lottery_id'] ?? 0);
     try {
-        $skaiMleHeaderQ = $db->getQuery(true)
-            ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
-            ->from($db->quoteName('#__mle_skai_batch_header'))
-            ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchId)
-            ->where($db->quoteName('user_id') . ' = ' . (int)$user->id)
-            ->setLimit(1);
-        $db->setQuery($skaiMleHeaderQ);
-        $skaiMleHeaderRow = $db->loadAssoc();
+        $skaiMleHeaderRow = (
+            is_array($skaiCachedBatchHeaderRow)
+            && (int)($skaiCachedBatchHeaderRow['id'] ?? 0) === (int)$skaiSourceBatchId
+        ) ? $skaiCachedBatchHeaderRow : null;
+        if (!is_array($skaiMleHeaderRow) || empty($skaiMleHeaderRow)) {
+            $skaiMleHeaderQ = $db->getQuery(true)
+                ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
+                ->from($db->quoteName('#__mle_skai_batch_header'))
+                ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchId)
+                ->where($db->quoteName('user_id') . ' = ' . (int)$user->id)
+                ->setLimit(1);
+            $db->setQuery($skaiMleHeaderQ);
+            $skaiMleHeaderRow = $db->loadAssoc();
+        }
         if (!is_array($skaiMleHeaderRow) || empty($skaiMleHeaderRow)) {
             $skaiBatchIdentityFail = 'batch_context_missing';
         } else {
@@ -16866,15 +16876,22 @@ if (!$skaiBatchSaveMode && $skaiHasRealBatchIdentity) {
             ) {
                 $skaiBatchIdentityFail = 'batch_lottery_mismatch';
             } else {
-                $skaiMleRunQ = $db->getQuery(true)
-                    ->select($db->quoteName('id'))
-                    ->from($db->quoteName('#__mle_skai_batch_run'))
-                    ->where($db->quoteName('batch_id') . ' = ' . (int)$skaiSourceBatchId)
-                    ->where($db->quoteName('run_order') . ' = ' . (int)$skaiSourceBatchRunOrder)
-                    ->order($db->quoteName('id') . ' DESC')
-                    ->setLimit(1);
-                $db->setQuery($skaiMleRunQ);
-                $skaiMleRunIdForDemotion = (int)$db->loadResult();
+                $skaiMleRunIdForDemotion = (
+                    is_array($skaiCachedBatchRunRow)
+                    && (int)($skaiCachedBatchRunRow['batch_id'] ?? 0) === (int)$skaiSourceBatchId
+                    && (int)($skaiCachedBatchRunRow['run_order'] ?? 0) === (int)$skaiSourceBatchRunOrder
+                ) ? (int)($skaiCachedBatchRunRow['id'] ?? 0) : 0;
+                if ($skaiMleRunIdForDemotion <= 0) {
+                    $skaiMleRunQ = $db->getQuery(true)
+                        ->select($db->quoteName('id'))
+                        ->from($db->quoteName('#__mle_skai_batch_run'))
+                        ->where($db->quoteName('batch_id') . ' = ' . (int)$skaiSourceBatchId)
+                        ->where($db->quoteName('run_order') . ' = ' . (int)$skaiSourceBatchRunOrder)
+                        ->order($db->quoteName('id') . ' DESC')
+                        ->setLimit(1);
+                    $db->setQuery($skaiMleRunQ);
+                    $skaiMleRunIdForDemotion = (int)$db->loadResult();
+                }
                 if ($skaiMleRunIdForDemotion <= 0) {
                     $skaiBatchIdentityFail = 'batch_run_missing';
                 }
