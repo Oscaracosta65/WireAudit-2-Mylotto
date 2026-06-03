@@ -345,6 +345,54 @@ function lecron_candidate_lane(array $row)
     return 'eligible_saved';
 }
 
+// [CRON_BATCH_GUARD_2026] Validate that a batch-linked saved row still has a
+// matching mle_skai_batch_header before allowing cron to score it.
+// Returns '' (empty string) when the row is safe to score.
+// Returns a non-empty reason string when the row must be skipped:
+//   batch_run_order_invalid  - source_batch_run_order is outside 1-9
+//   batch_context_missing    - header row not found or has no lottery_id
+//   batch_lottery_mismatch   - header lottery_id does not match the saved row
+// Rows with source_batch_id = 0 (no batch context) are always passed through.
+// If the mle_skai_batch_header table does not exist the check is skipped (safe pass).
+function lecron_validate_batch_context($db, array $row)
+{
+    $batchId = (int)($row['source_batch_id'] ?? 0);
+    if ($batchId <= 0) {
+        return '';
+    }
+    $runOrder = (int)($row['source_batch_run_order'] ?? 0);
+    if ($runOrder < 1 || $runOrder > 9) {
+        return 'batch_run_order_invalid';
+    }
+    $raw = $db->getPrefix() . 'mle_skai_batch_header';
+    if (!lecron_table_exists($db, $raw)) {
+        return '';
+    }
+    try {
+        $q = $db->getQuery(true)
+            ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
+            ->from($db->quoteName('#__mle_skai_batch_header'))
+            ->where($db->quoteName('id') . ' = ' . $batchId)
+            ->setLimit(1);
+        $db->setQuery($q);
+        $headerRow = $db->loadAssoc();
+    } catch (Throwable $e) {
+        return '';
+    }
+    if (!is_array($headerRow) || empty($headerRow)) {
+        return 'batch_context_missing';
+    }
+    $headerLotteryId = (int)($headerRow['lottery_id'] ?? 0);
+    if ($headerLotteryId <= 0) {
+        return 'batch_context_missing';
+    }
+    $effectiveLotteryId = lecron_effective_lottery_id($row);
+    if ($effectiveLotteryId > 0 && $effectiveLotteryId !== $headerLotteryId) {
+        return 'batch_lottery_mismatch';
+    }
+    return '';
+}
+
 function lecron_increment_counter(array &$arr, $key)
 {
     $key = trim((string)$key);
@@ -1839,6 +1887,14 @@ try {
         $savedId = (int)($row['id'] ?? 0);
         $lane = lecron_candidate_lane($row);
         lecron_increment_counter($summary['lane_counts'], $lane);
+        $batchFail = lecron_validate_batch_context($db, $row);
+        if ($batchFail !== '') {
+            $summary['waiting']++;
+            lecron_increment_counter($summary['reason_counts'], $batchFail);
+            try { lecron_mark_waiting($db, $row, $batchFail, $dryRun); } catch (Throwable $batchWaitEx) { lecron_log('batch guard mark failed saved_row_id=' . $savedId . ' error=' . $batchWaitEx->getMessage()); }
+            $summary['items'][] = array('saved_row_id' => $savedId, 'status' => 'waiting', 'lane' => $lane, 'reason' => $batchFail);
+            continue;
+        }
         $score = lecron_score_row($db, $row);
         if (empty($score['ok'])) {
             $summary['waiting']++;
