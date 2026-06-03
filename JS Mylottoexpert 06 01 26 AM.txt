@@ -1,3 +1,4 @@
+window.__MLE_CORE_JS_BUILD = '20260601';
 (function(){
   'use strict';
   if (window.__MLE_LOADING_EXPERIENCE_V1__) { return; }
@@ -22,12 +23,18 @@
   }
   function showRecovery(){
     var wrap = ensure();
+    var copy = document.getElementById('mle-loading-experience-copy');
     if (!wrap) { return; }
+    if (copy) { copy.textContent = 'Loading is taking longer than expected. Please stay on this page while LottoExpert finishes, or reload the workspace if this message does not clear.'; }
     wrap.className = 'mle-loading-experience is-active';
   }
   function armFailSafe(ms){
+    var waitMs = (typeof ms === 'number' && ms > 0) ? ms : 15000;
     if (failTimer) { window.clearTimeout(failTimer); failTimer = null; }
-    return;
+    failTimer = window.setTimeout(function(){
+      failTimer = null;
+      showRecovery();
+    }, waitMs);
   }
   function show(title, copy){
     var wrap = ensure();
@@ -72,6 +79,7 @@
   });
   window.addEventListener('load', function(){ hide(250); }, false);
   window.addEventListener('pageshow', function(){ hide(120); }, false);
+  window.addEventListener('pagehide', function(){ hide(0); }, false);
   document.addEventListener('submit', function(ev){
     var form = ev.target;
     if (!form || form.getAttribute('data-mle-no-loading') === '1') { return; }
@@ -123,22 +131,19 @@
   }
   function ensureBatchUrl(url, precision){
     if (!isSkaiUrl(url)) { return url || ''; }
-    url = addParam(url, 'mle_skai_batch', '1');
-    url = addParam(url, 'mle_skai_bridge', '1');
-    url = addParam(url, 'mle_global_batch', '1');
-    url = addParam(url, 'mle_batch_scope', 'exact_lottery');
     url = addParam(url, 'mle_command_source', 'mylottoexpert');
     url = addParam(url, 'source', 'mylottoexpert');
     if (precision) {
+      url = addParam(url, 'mle_skai_batch', '1');
+      url = addParam(url, 'mle_skai_bridge', '1');
+      url = addParam(url, 'mle_global_batch', '1');
+      url = addParam(url, 'mle_batch_scope', 'exact_lottery');
       url = addParam(url, 'mle_precision_batch', '1');
       url = addParam(url, 'mle_guided_mode', 'required');
       url = addParam(url, 'mle_required_action', 'precision_batch');
       url = addParam(url, 'open', 'precision_batch');
     } else {
       url = addParam(url, 'mle_guided_mode', 'global_learning');
-      url = addParam(url, 'mle_required_action', 'regular_9_batch');
-      url = addParam(url, 'mle_batch_type', 'regular_global_learning');
-      url = addParam(url, 'open', 'regular_9_batch');
       url = addParam(url, 'mle_single_mode', 'best_global_settings');
       url = addParam(url, 'mle_single_source', 'global_learning');
     }
@@ -200,7 +205,6 @@
   function submitCreateBatchForm(form, button){
     if (!form) { return false; }
     if (!qs('input[name="mle_action"][value="create_skai_batch"]', form)) { return false; }
-    try { form.setAttribute('target', '_blank'); } catch(e) {}
     try { form.setAttribute('data-mle-no-loading', '1'); } catch(e2) {}
     markStarted(button || form, 'Creating 9BATCH run...');
     if (typeof form.requestSubmit === 'function') {
@@ -210,26 +214,95 @@
     finishExternalSkaiHandoff(button || form);
     return true;
   }
+  function normalizeLotteryId(raw){
+    return String(raw || '').replace(/[^0-9]/g, '');
+  }
+  function formLotteryId(form){
+    var row = form ? qs('input[name="lottery_id"]', form) : null;
+    return normalizeLotteryId(row ? row.value : '');
+  }
+  function buttonLotteryId(btn, card){
+    var outer;
+    var id = normalizeLotteryId((card && card.getAttribute && card.getAttribute('data-lottery-id')) || (btn && btn.getAttribute && btn.getAttribute('data-lottery-id')) || '');
+    if (id) { return id; }
+    outer = closest(btn, '.mle-lottery-outer');
+    return normalizeLotteryId((outer && outer.getAttribute && outer.getAttribute('data-outer-lottery-id')) || '');
+  }
+  function logBatchLotteryMismatch(clickedId, formId){
+    if (!clickedId || !formId || clickedId === formId) { return; }
+    if (window.console && typeof window.console.warn === 'function') {
+      window.console.warn('batch_form_lottery_mismatch clicked=' + clickedId + ' form=' + formId);
+    }
+  }
+  function isPlanMatch(form, kind){
+    var plan;
+    var phase;
+    var marker;
+    if (!form || !qs('input[name="mle_action"][value="create_skai_batch"]', form)) { return false; }
+    marker = String(form.getAttribute('data-mle-v38-batch-action-form') || '').toLowerCase();
+    plan = String((qs('input[name="mle_batch_plan"]', form) || {}).value || '').toLowerCase();
+    phase = String((qs('input[name="mle_batch_phase"]', form) || {}).value || '').toLowerCase();
+    if (kind === 'regular') {
+      return hasClass(form, 'mle-regular-batch-action-form') || marker === 'regular' || plan === 'regular_9_batch' || plan === 'regular' || plan === 'regular_skai_batch' || phase === 'regular';
+    }
+    if (kind === 'horizon') {
+      return hasClass(form, 'mle-history-window-action-form') || marker === 'horizon' || plan === 'horizon' || phase === 'horizon';
+    }
+    if (kind === 'settings') {
+      return hasClass(form, 'mle-next-settings-run__form') || hasClass(form, 'mle-skai-batch-test__form') || marker === 'settings' || plan === 'settings' || phase === 'settings';
+    }
+    return true;
+  }
+  function findMatchingBatchForm(root, selector, kind, lotteryId){
+    var forms;
+    var i;
+    var form;
+    var fid;
+    if (!root) { return null; }
+    forms = root.querySelectorAll(selector);
+    for (i = 0; i < forms.length; i++) {
+      form = forms[i];
+      if (!isPlanMatch(form, kind)) { continue; }
+      fid = formLotteryId(form);
+      if (lotteryId && fid && lotteryId !== fid) {
+        logBatchLotteryMismatch(lotteryId, fid);
+        continue;
+      }
+      return form;
+    }
+    return null;
+  }
   function findInlineBatchForm(btn){
     var journey;
     var plan;
     var card;
     var form;
+    var lotteryId;
+    var regularScope;
     if (!btn) { return null; }
-    journey = closest(btn, '.mle-v38-user-journey');
-    if (journey) {
-      form = qs('form.mle-v38-batch-action-form', journey);
-      if (form) { return form; }
-    }
     card = closest(btn, '.mle-advisory-card');
+    lotteryId = buttonLotteryId(btn, card);
+    journey = closest(btn, '.mle-v38-user-journey');
     plan = String(btn.getAttribute('data-action-target') || '').toLowerCase();
-    if (card && (plan === 'history_window_check' || plan === 'horizon_batch' || plan === 'horizon_ready_batch')) {
-      form = qs('form.mle-history-window-action-form, form.mle-v38-batch-action-form[data-mle-v38-batch-action-form="horizon"]', card);
+    if (plan === 'history_window_check' || plan === 'horizon_batch' || plan === 'horizon_ready_batch') {
+      form = findMatchingBatchForm(journey, 'form.mle-history-window-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="horizon"]', 'horizon', lotteryId) || findMatchingBatchForm(card, 'form.mle-history-window-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="horizon"]', 'horizon', lotteryId);
       if (form) { return form; }
     }
-    if (card && (plan === 'prediction_9_batch' || plan === 'settings_batch' || plan === 'settings_ready_batch' || plan === 'next_settings' || plan === 'precision_batch')) {
-      form = qs('form.mle-next-settings-run__form, form.mle-skai-batch-test__form, form.mle-v38-batch-action-form[data-mle-v38-batch-action-form="settings"]', card);
+    if (plan === 'prediction_9_batch' || plan === 'settings_batch' || plan === 'settings_ready_batch' || plan === 'next_settings' || plan === 'precision_batch') {
+      form = findMatchingBatchForm(journey, 'form.mle-next-settings-run__form, form.mle-skai-batch-test__form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="settings"]', 'settings', lotteryId) || findMatchingBatchForm(card, 'form.mle-next-settings-run__form, form.mle-skai-batch-test__form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="settings"]', 'settings', lotteryId);
       if (form) { return form; }
+    }
+    if (card && (plan === 'regular_skai_batch' || plan === 'regular_skai' || isRegularSkaiButton(btn))) {
+      form = findMatchingBatchForm(journey, 'form.mle-regular-batch-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', 'regular', lotteryId) || findMatchingBatchForm(card, 'form.mle-regular-batch-action-form, form.mle-v38-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', 'regular', lotteryId);
+      if (form) { return form; }
+      regularScope = qs('form input[name="mle_action"][value="create_skai_batch"]', card);
+      if (regularScope && regularScope.form) {
+        form = regularScope.form;
+        if (isPlanMatch(form, 'regular')) {
+          if (!lotteryId || !formLotteryId(form) || formLotteryId(form) === lotteryId) { return form; }
+          logBatchLotteryMismatch(lotteryId, formLotteryId(form));
+        }
+      }
     }
     return null;
   }
@@ -239,8 +312,98 @@
     hay = text(el) + ' ' + String(el.className || '') + ' ' + String(el.getAttribute('data-action-target') || '');
     return /regular_skai_batch|regular_skai|global-learning|open skai global|9\s*-?batch/i.test(hay) && !!(el.getAttribute('data-skai-regular-url') || el.getAttribute('data-skai-url') || el.getAttribute('href'));
   }
+  function isCreateBatchForm(form){
+    return !!(form && qs('input[name="mle_action"][value="create_skai_batch"]', form));
+  }
+  function isFinalBatchSubmitTrigger(el, form){
+    var submitLike;
+    var typeAttr;
+    if (!el || !el.getAttribute) { return false; }
+    submitLike = closest(el, '[data-nine-batch-submit="1"],button[type="submit"],input[type="submit"]');
+    if (!submitLike) { submitLike = el; }
+    if (!form) { form = (submitLike && submitLike.form) ? submitLike.form : closest(submitLike, 'form'); }
+    if (!isCreateBatchForm(form)) { return false; }
+    if (String(submitLike.getAttribute('data-nine-batch-submit') || '') === '1') { return true; }
+    typeAttr = String(submitLike.getAttribute('type') || '').toLowerCase();
+    return typeAttr === 'submit' || typeAttr === 'image';
+  }
+  function resolveSummaryCard(el){
+    var targetCardId;
+    var lotteryId;
+    var card;
+    targetCardId = String(el.getAttribute('data-target-card') || '').replace(/^#/, '');
+    if (targetCardId) { card = document.getElementById(targetCardId); }
+    lotteryId = String(el.getAttribute('data-lottery-id') || '').replace(/[^0-9]/g, '');
+    if (!lotteryId && !card) {
+      card = closest(el, '.mle-lottery-outer');
+      lotteryId = String((card && card.getAttribute('data-outer-lottery-id')) || '').replace(/[^0-9]/g, '');
+    }
+    if (!card && lotteryId) {
+      card = qs('.mle-advisory-card[data-lottery-id="' + lotteryId + '"], .mle-lottery-outer[data-outer-lottery-id="' + lotteryId + '"], [data-mle-lottery-card][data-lottery-id="' + lotteryId + '"]', document);
+    }
+    if (!card) { card = closest(el, '.mle-advisory-card, .mle-lottery-outer'); }
+    return card || null;
+  }
+  function revealAncestors(node){
+    var cur = node;
+    while (cur && cur !== document.body) {
+      if (cur.tagName && String(cur.tagName).toLowerCase() === 'details') {
+        try { cur.open = true; } catch(ignoreOpen) {}
+        try { cur.setAttribute('open', 'open'); } catch(ignoreOpenAttr) {}
+      }
+      if (cur.classList) {
+        cur.classList.remove('collapsed', 'body-collapsed', 'is-collapsed', 'mle-is-collapsed');
+        cur.classList.add('open', 'is-open', 'is-expanded', 'mle-expanded', 'mle-is-expanded');
+      }
+      if (cur.style && cur.style.display === 'none') { cur.style.display = ''; }
+      try { cur.removeAttribute('hidden'); } catch(ignoreHidden) {}
+      try { cur.setAttribute('aria-hidden', 'false'); } catch(ignoreAriaHidden) {}
+      cur = cur.parentNode;
+    }
+  }
+  function openSummaryCard(card){
+    var body;
+    if (!card) { return; }
+    revealAncestors(card);
+    try { card.setAttribute('aria-expanded', 'true'); } catch(ignoreCardExpanded) {}
+    body = qs('.mle-advisory-card__body, .mle-lottery-outer-body, .mle-lottery-card-body, .mle-card-body, .mle-advisory-card-body', card);
+    if (body) {
+      revealAncestors(body);
+      if (body.style) { body.style.display = 'block'; }
+    }
+  }
+  function resolveSummaryTarget(el, card){
+    var targetId;
+    var panelId;
+    var target = null;
+    targetId = String(el.getAttribute('data-target-section') || '').replace(/^#/, '');
+    panelId = String(el.getAttribute('data-target-panel') || el.getAttribute('data-open-details') || '').replace(/^#/, '');
+    if (targetId) { target = document.getElementById(targetId); }
+    if (!target && panelId) { target = document.getElementById(panelId); }
+    if (!target && card && card.id) { target = card; }
+    if (!target) { target = card || resolveSummaryCard(el); }
+    return target || null;
+  }
+  function openAndJumpSummaryAction(el){
+    var card = resolveSummaryCard(el);
+    var target;
+    if (typeof window.mleActionJump === 'function') {
+      try { window.mleActionJump(el); return true; } catch(ignoreJump) {}
+    }
+    if (card) { openSummaryCard(card); }
+    target = resolveSummaryTarget(el, card);
+    if (target) {
+      revealAncestors(target);
+      try { target.setAttribute('aria-expanded', 'true'); } catch(ignoreTargetExpanded) {}
+      try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      catch (e1) { try { target.scrollIntoView(true); } catch (e2) {} }
+      try { target.focus({ preventScroll: true }); } catch(e3) { try { target.focus(); } catch(e4) {} }
+      return true;
+    }
+    return false;
+  }
   function handleClick(ev){
-    var el = closest(ev.target, '.mle-open-skai-precision-batch, .mle-regular-skai-batch-action-btn, button[data-skai-url], button[data-skai-regular-url], a[data-skai-url], a[data-skai-regular-url], a[href*="skai-lottery-prediction"], .mle-v38-primary-action, .mle-v73-btn[data-mle-v73-action="run-batch"], .mle-v73-btn[data-mle-v73-action="open-skai"]');
+    var el = closest(ev.target, '.mle-open-skai-precision-batch, .mle-regular-skai-batch-action-btn, button[data-skai-url], button[data-skai-regular-url], a[data-skai-url], a[data-skai-regular-url], a[href*="skai-lottery-prediction"], .mle-v38-primary-action, .mle-v73-btn[data-mle-v73-action="open-skai"]');
     var card;
     var form;
     var url;
@@ -249,7 +412,33 @@
     if (!el) { return; }
     action = String(el.getAttribute('data-action-target') || el.getAttribute('data-mle-v73-action') || '').toLowerCase();
 
-    if (action === 'history_window_check' || action === 'prediction_9_batch' || action === 'horizon_batch' || action === 'settings_batch' || action === 'next_settings' || action === 'precision_batch') {
+    if (action === 'history_window_check' || action === 'prediction_9_batch' || action === 'horizon_batch' || action === 'settings_batch' || action === 'next_settings' || action === 'precision_batch' || action === 'run-batch') {
+      form = findInlineBatchForm(el);
+      if (isFinalBatchSubmitTrigger(el, form)) {
+        ev.preventDefault();
+        if (ev.stopPropagation) { ev.stopPropagation(); }
+        if (ev.stopImmediatePropagation) { ev.stopImmediatePropagation(); }
+        if (!form) {
+          restoreHandoffButton(el);
+          clearSkaiHandoffLoading();
+          if (window.alert) { window.alert('The tracked 9-run batch form is missing. Please refresh and try again.'); }
+          return;
+        }
+        submitCreateBatchForm(form, closest(el, '[data-nine-batch-submit="1"],button[type="submit"],input[type="submit"]') || qs('[data-nine-batch-submit="1"],button[type="submit"],input[type="submit"]', form) || el);
+        return;
+      }
+      ev.preventDefault();
+      if (ev.stopPropagation) { ev.stopPropagation(); }
+      if (ev.stopImmediatePropagation) { ev.stopImmediatePropagation(); }
+      openAndJumpSummaryAction(el);
+      return;
+    }
+
+    if (hasClass(el, 'mle-open-skai-precision-batch')) {
+      url = el.getAttribute('data-skai-url') || el.getAttribute('href') || '';
+      precision = true;
+      storePrecisionPayload(el);
+    } else if (isRegularSkaiButton(el) || action === 'regular_skai_batch' || action === 'regular_skai') {
       form = findInlineBatchForm(el);
       if (form) {
         ev.preventDefault();
@@ -258,13 +447,14 @@
         submitCreateBatchForm(form, qs('[data-nine-batch-submit="1"],button[type="submit"],input[type="submit"]', form) || el);
         return;
       }
-    }
-
-    if (hasClass(el, 'mle-open-skai-precision-batch')) {
-      url = el.getAttribute('data-skai-url') || el.getAttribute('href') || '';
-      precision = true;
-      storePrecisionPayload(el);
-    } else if (isRegularSkaiButton(el) || action === 'open-skai' || action === 'regular_skai_batch' || action === 'regular_skai') {
+      ev.preventDefault();
+      if (ev.stopPropagation) { ev.stopPropagation(); }
+      if (ev.stopImmediatePropagation) { ev.stopImmediatePropagation(); }
+      restoreHandoffButton(el);
+      clearSkaiHandoffLoading();
+      if (window.alert) { window.alert('The tracked 9-run batch form is missing. Please refresh and try again.'); }
+      return;
+    } else if (action === 'open-skai') {
       url = el.getAttribute('data-skai-regular-url') || el.getAttribute('data-skai-url') || el.getAttribute('href') || '';
       precision = false;
       if (!url) {
@@ -337,33 +527,37 @@
     } catch(e) {}
   }
   function openLotteryCards(){
-    var i, btn;
     qsa('.mle-lottery-outer').forEach(function(outer){
       outer.classList.remove('body-collapsed','collapsed');
       outer.setAttribute('aria-expanded','true');
-      qsa('.mle-lottery-outer-body', outer).forEach(function(body){body.removeAttribute('hidden');body.style.display='';body.style.maxHeight='none';body.style.opacity='1';body.style.pointerEvents='';});
-      qsa('.mle-lottery-outer-toggle,[data-outer-lottery-toggle-btn]', outer).forEach(function(b){b.textContent='Open';b.setAttribute('aria-expanded','true');b.setAttribute('aria-label','Lottery card is open');});
+      qsa('.mle-lottery-outer-body', outer).forEach(function(body){body.removeAttribute('hidden');body.setAttribute('aria-hidden','false');body.style.display='';body.style.maxHeight='none';body.style.opacity='1';body.style.pointerEvents='';});
+      qsa('.mle-lottery-outer-toggle,[data-outer-lottery-toggle-btn]', outer).forEach(function(b){b.textContent='Collapse';b.setAttribute('aria-expanded','true');b.setAttribute('aria-label','Collapse lottery card');});
     });
     qsa('.lottery-group').forEach(function(group){
       group.classList.remove('collapsed');
       group.setAttribute('aria-expanded','true');
-      qsa('.lottery-collapsible-content', group).forEach(function(body){body.removeAttribute('hidden');body.style.display='';body.style.maxHeight='none';body.style.opacity='1';body.style.pointerEvents='';});
-      qsa('.lottery-collapse-toggle,[data-lottery-toggle-btn]', group).forEach(function(b){b.textContent='Open';b.setAttribute('aria-expanded','true');b.setAttribute('aria-label','Lottery card is open');});
+      qsa('.lottery-collapsible-content', group).forEach(function(body){body.removeAttribute('hidden');body.setAttribute('aria-hidden','false');body.style.display='';body.style.maxHeight='none';body.style.opacity='1';body.style.pointerEvents='';});
+      qsa('.lottery-collapse-toggle,[data-lottery-toggle-btn]', group).forEach(function(b){b.textContent='Collapse';b.setAttribute('aria-expanded','true');b.setAttribute('aria-label','Collapse lottery section');});
     });
   }
-  window.mleForceLotteryCardsOpen=openLotteryCards;
+  window.mleForceLotteryCardsOpen=function(){ return false; };
   clearCollapsedStorage();
   if (document.readyState==='loading') { document.addEventListener('DOMContentLoaded', function(){clearCollapsedStorage();openLotteryCards();}); }
   else { clearCollapsedStorage();openLotteryCards(); }
   window.setTimeout(openLotteryCards, 250);
   window.setTimeout(openLotteryCards, 900);
   document.addEventListener('click', function(ev){
-    var t=ev.target && ev.target.closest ? ev.target.closest('.mle-lottery-outer-toggle,[data-outer-lottery-toggle-btn],.lottery-collapse-toggle,[data-lottery-toggle-btn],[data-lottery-collapse-all-btn],[data-lottery-expand-all-btn]') : null;
+    var t=ev.target && ev.target.closest ? ev.target.closest('[data-lottery-toggle-all-btn],[data-lottery-collapse-all-btn],[data-lottery-expand-all-btn]') : null;
+    var shouldCollapse;
     if (!t) { return; }
+    if (typeof window.skaiLotteryCollapseAll !== 'function') { return; }
     ev.preventDefault();
     ev.stopPropagation();
     clearCollapsedStorage();
-    openLotteryCards();
+    if (t.getAttribute('data-lottery-collapse-all-btn') !== null) { shouldCollapse = true; }
+    else if (t.getAttribute('data-lottery-expand-all-btn') !== null) { shouldCollapse = false; }
+    else { shouldCollapse = String(t.getAttribute('aria-expanded') || 'false') === 'true'; }
+    window.skaiLotteryCollapseAll(shouldCollapse);
     return false;
   }, true);
 }());
@@ -554,32 +748,28 @@ window.mleActionJump = mleActionJump;
     var targetId = btn.getAttribute('data-mle-rs-toggle');
     var lsKey    = btn.getAttribute('data-mle-rs-ls-key');
     var panel    = targetId ? byId(targetId) : null;
-    if (!panel) { return; }
-    var iconEl   = btn.querySelector('.mle-rs-group__toggle-icon');
-    
-    var savedCollapsed = lsKey ? safeLS('get', lsKey) : null;
-    if (savedCollapsed === '1') {
-      btn.setAttribute('aria-expanded', 'false');
-      panel.setAttribute('hidden', '');
-      if (iconEl) { iconEl.innerHTML = '&#9660;'; }
-    } else if (savedCollapsed === '0') {
-      btn.setAttribute('aria-expanded', 'true');
-      panel.removeAttribute('hidden');
-      if (iconEl) { iconEl.innerHTML = '&#9650;'; }
-    }
-    btn.addEventListener('click', function () {
-      var isExpanded = btn.getAttribute('aria-expanded') === 'true';
-      if (isExpanded) {
-        btn.setAttribute('aria-expanded', 'false');
-        panel.setAttribute('hidden', '');
-        if (iconEl) { iconEl.innerHTML = '&#9660;'; }
-        if (lsKey) { safeLS('set', lsKey, '1'); }
-      } else {
-        btn.setAttribute('aria-expanded', 'true');
+    var iconEl;
+    var savedCollapsed;
+    function setExpanded(expanded, shouldPersist) {
+      btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      if (expanded) {
         panel.removeAttribute('hidden');
-        if (iconEl) { iconEl.innerHTML = '&#9650;'; }
-        if (lsKey) { safeLS('set', lsKey, '0'); }
+        panel.setAttribute('aria-hidden', 'false');
+      } else {
+        panel.setAttribute('hidden', 'hidden');
+        panel.setAttribute('aria-hidden', 'true');
       }
+      if (iconEl) { iconEl.innerHTML = expanded ? '&#9650;' : '&#9660;'; }
+      if (shouldPersist && lsKey) { safeLS('set', lsKey, expanded ? '0' : '1'); }
+    }
+    if (!panel) { return; }
+    iconEl   = btn.querySelector('.mle-rs-group__toggle-icon');
+    savedCollapsed = lsKey ? safeLS('get', lsKey) : null;
+    if (savedCollapsed === '1') { setExpanded(false, false); }
+    else if (savedCollapsed === '0') { setExpanded(true, false); }
+    else { setExpanded(panel.getAttribute('hidden') === null, false); }
+    btn.addEventListener('click', function () {
+      setExpanded(btn.getAttribute('aria-expanded') !== 'true', true);
     });
   }
 
@@ -912,9 +1102,11 @@ window.mleActionJump = mleActionJump;
   function hasClass(el,name){return el&&el.className&&(' '+el.className+' ').indexOf(' '+name+' ')>-1;}
   function findButton(el){while(el&&el!==document){if(el.tagName&&el.tagName.toUpperCase()==='BUTTON'){return el;}el=el.parentNode;}return null;}
   function setButtonText(btn,open){var span=btn.querySelector('span');var node=span||btn;var txt=node.textContent||'';if(txt==='Expand'||txt==='Collapse'){node.textContent=open?'Collapse':'Expand';return;}if(txt.indexOf('Show ')===0){node.textContent=(open?'Hide ':'Show ')+txt.substring(5);return;}if(txt.indexOf('Hide ')===0){node.textContent=(open?'Hide ':'Show ')+txt.substring(5);return;}if(txt.indexOf('View ')===0){node.textContent=(open?'Hide ':'View ')+txt.substring(5);return;}}
-  function openPanel(id){var panel=document.getElementById(id);if(!panel){return false;}panel.style.display='block';panel.setAttribute('aria-hidden','false');var toggles=document.querySelectorAll('[aria-controls="'+id+'"]');var i;for(i=0;i<toggles.length;i++){toggles[i].setAttribute('aria-expanded','true');setButtonText(toggles[i],true);}if(panel.scrollIntoView){panel.scrollIntoView({behavior:'smooth',block:'nearest'});}return true;}
-  function localMessage(btn,msg){var wrap=btn.parentNode;var box=document.createElement('div');box.className='mle-local-message';box.appendChild(document.createTextNode(msg));wrap.appendChild(box);}
-  document.addEventListener('click',function(e){var btn=findButton(e.target);if(!btn){return;}if(hasClass(btn,'mle-lottery-toggle')||hasClass(btn,'mle-section-toggle')){e.preventDefault();var id=btn.getAttribute('aria-controls');var body=id?document.getElementById(id):null;if(!body){localMessage(btn,'This section could not be opened because its target was not found.');return;}var open=(body.style.display==='none'||body.style.display==='');body.style.display=open?'block':'none';body.setAttribute('aria-hidden',open?'false':'true');btn.setAttribute('aria-expanded',open?'true':'false');setButtonText(btn,open);return;}if(hasClass(btn,'mle-review-runs-btn')){e.preventDefault();if(window.mleOpenPendingRunsSource&&((btn.getAttribute('data-target-panel')||'').indexOf('pending')!==-1||(btn.getAttribute('data-target-section')||'').indexOf('pending')!==-1||(btn.getAttribute('data-open-details')||'').indexOf('pending')!==-1)){return window.mleOpenPendingRunsSource(btn);}if(!openPanel(btn.getAttribute('data-target-panel'))){localMessage(btn,'This section could not be opened because its target was not found.');}return;}if(hasClass(btn,'mle-leave-as-is-btn')){e.preventDefault();localMessage(btn,'No changes applied. Your saved history was left as is.');return;}}
+  function setPanelState(panel,expanded){if(!panel){return;}if(expanded){panel.style.display='block';panel.removeAttribute('hidden');panel.setAttribute('aria-hidden','false');}else{panel.style.display='none';panel.setAttribute('hidden','hidden');panel.setAttribute('aria-hidden','true');}}
+  function isPanelOpen(panel,btn){if(!panel){return false;}if(btn&&btn.getAttribute('aria-expanded')==='true'){return true;}if(panel.getAttribute('hidden')!==null||panel.getAttribute('aria-hidden')==='true'||panel.style.display==='none'){return false;}if(window.getComputedStyle){return window.getComputedStyle(panel).display!=='none';}return true;}
+  function openPanel(id){var panel=document.getElementById(id);if(!panel){return false;}setPanelState(panel,true);var toggles=document.querySelectorAll('[aria-controls="'+id+'"]');var i;for(i=0;i<toggles.length;i++){toggles[i].setAttribute('aria-expanded','true');setButtonText(toggles[i],true);}if(panel.scrollIntoView){panel.scrollIntoView({behavior:'smooth',block:'nearest'});}return true;}
+  function localMessage(btn,msg){var wrap=btn.parentNode;var old=wrap&&wrap.querySelector?wrap.querySelector('.mle-local-message'):null;var box;if(old&&old.parentNode){old.parentNode.removeChild(old);}box=document.createElement('div');box.className='mle-local-message';box.setAttribute('role','alert');box.appendChild(document.createTextNode(msg));if(wrap){wrap.appendChild(box);}}
+  document.addEventListener('click',function(e){var btn=findButton(e.target);var id;var body;var open;if(!btn){return;}if(hasClass(btn,'mle-lottery-toggle')||hasClass(btn,'mle-section-toggle')){e.preventDefault();id=btn.getAttribute('aria-controls');body=id?document.getElementById(id):null;if(!body){localMessage(btn,'This section could not be opened because its content was not found. Please refresh this page and try again.');return;}open=!isPanelOpen(body,btn);setPanelState(body,open);btn.setAttribute('aria-expanded',open?'true':'false');setButtonText(btn,open);return;}if(hasClass(btn,'mle-review-runs-btn')){e.preventDefault();if(window.mleOpenPendingRunsSource&&((btn.getAttribute('data-target-panel')||'').indexOf('pending')!==-1||(btn.getAttribute('data-target-section')||'').indexOf('pending')!==-1||(btn.getAttribute('data-open-details')||'').indexOf('pending')!==-1)){return window.mleOpenPendingRunsSource(btn);}if(!openPanel(btn.getAttribute('data-target-panel'))){localMessage(btn,'This section could not be opened because its content was not found. Please refresh this page and try again.');}return;}if(hasClass(btn,'mle-leave-as-is-btn')){e.preventDefault();localMessage(btn,'No changes were applied. You can keep reviewing this lottery or use another action when you are ready.');return;}}
   ,false);
 }());
 
@@ -3401,7 +3593,17 @@ if (window.location.search && window.location.search.indexOf('debug_pred_results
 }());
 
 function skaiLotteryToggle(btn) {
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
+  if (!btn || !btn.closest) { return false; }
+  var group = btn.closest('.lottery-group');
+  var outer = btn.closest('.mle-lottery-outer');
+  if (group) {
+    skaiLotterySetOneGroup(group, !group.classList.contains('collapsed'));
+    return false;
+  }
+  if (outer) {
+    skaiLotterySetOneOuter(outer, !outer.classList.contains('body-collapsed'));
+    return false;
+  }
   return false;
 }
 
@@ -3415,14 +3617,18 @@ function skaiLotterySyncAllButtons(collapsed) {
 }
 
 function skaiLotterySetAllState(shouldCollapse) {
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
-  if (typeof skaiLotterySyncAllButtons === 'function') { skaiLotterySyncAllButtons(false); }
+  var outers = document.querySelectorAll('.mle-lottery-outer');
+  var groups = document.querySelectorAll('.lottery-group');
+  var i;
+  shouldCollapse = !!shouldCollapse;
+  for (i = 0; i < outers.length; i++) { skaiLotterySetOneOuter(outers[i], shouldCollapse); }
+  for (i = 0; i < groups.length; i++) { skaiLotterySetOneGroup(groups[i], shouldCollapse); }
+  if (typeof skaiLotterySyncAllButtons === 'function') { skaiLotterySyncAllButtons(shouldCollapse); }
   return false;
 }
 
 function skaiLotteryCollapseAll(shouldCollapse) {
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
-  return false;
+  return skaiLotterySetAllState(!!shouldCollapse);
 }
 
 function mleV126SubmitNextSettingsAction(el, card, target) {
@@ -3712,23 +3918,52 @@ function mleStrategicJump(link) {
 }
 
 function skaiLotterySetOneOuter(outerEl, shouldCollapse) {
+  var body;
+  var btns;
+  var i;
   if (!outerEl) { return; }
-  outerEl.classList.remove('body-collapsed','collapsed');
-  outerEl.setAttribute('aria-expanded','true');
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
+  body = outerEl.querySelector('.mle-lottery-outer-body');
+  btns = outerEl.querySelectorAll('.mle-lottery-outer-toggle,[data-outer-lottery-toggle-btn]');
+  if (shouldCollapse) {
+    outerEl.classList.add('body-collapsed');
+    outerEl.classList.add('collapsed');
+    outerEl.setAttribute('aria-expanded','false');
+    if (body) { body.setAttribute('hidden','hidden'); body.style.display = 'none'; }
+    for (i = 0; i < btns.length; i++) { btns[i].textContent = 'Expand'; btns[i].setAttribute('aria-expanded','false'); btns[i].setAttribute('aria-label','Expand lottery section'); }
+  } else {
+    outerEl.classList.remove('body-collapsed','collapsed');
+    outerEl.setAttribute('aria-expanded','true');
+    if (body) { body.removeAttribute('hidden'); body.style.display = ''; }
+    for (i = 0; i < btns.length; i++) { btns[i].textContent = 'Collapse'; btns[i].setAttribute('aria-expanded','true'); btns[i].setAttribute('aria-label','Collapse lottery section'); }
+  }
 }
 
 function skaiLotterySetOneGroup(group, shouldCollapse) {
+  var body;
+  var btns;
+  var i;
   if (!group) { return; }
-  group.classList.remove('collapsed');
-  group.setAttribute('aria-expanded','true');
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
+  body = group.querySelector('.lottery-collapsible-content');
+  btns = group.querySelectorAll('.lottery-collapse-toggle,[data-lottery-toggle-btn]');
+  if (shouldCollapse) {
+    group.classList.add('collapsed');
+    group.setAttribute('aria-expanded','false');
+    if (body) { body.setAttribute('hidden','hidden'); body.style.display = 'none'; }
+    for (i = 0; i < btns.length; i++) { btns[i].textContent = 'Open'; btns[i].setAttribute('aria-expanded','false'); btns[i].setAttribute('aria-label','Expand lottery section'); }
+  } else {
+    group.classList.remove('collapsed');
+    group.setAttribute('aria-expanded','true');
+    if (body) { body.removeAttribute('hidden'); body.style.display = ''; }
+    for (i = 0; i < btns.length; i++) { btns[i].textContent = 'Collapse'; btns[i].setAttribute('aria-expanded','true'); btns[i].setAttribute('aria-label','Collapse lottery section'); }
+  }
 }
 
 function skaiLotteryToggleAll(btn) {
-  if (window.mleForceLotteryCardsOpen) { window.mleForceLotteryCardsOpen(); }
-  if (typeof skaiLotterySyncAllButtons === 'function') { skaiLotterySyncAllButtons(false); }
-  return false;
+  var collapse = true;
+  if (btn && btn.getAttribute) {
+    collapse = String(btn.getAttribute('aria-expanded') || 'true') === 'true';
+  }
+  return skaiLotterySetAllState(collapse);
 }
 
 (function initRunSelector() {
@@ -7126,6 +7361,16 @@ function mleAdvisoryCardPrint(btn) {
       f = qs('.mle-next-settings-run__form', card);
     }
 
+    if (mode === 'regular_skai_batch' || mode === 'regular_skai') {
+      f = qs('form.mle-regular-batch-action-form, form[data-mle-v38-batch-action-form="regular"]', card);
+      if (!f) {
+        actionInput = qs('form input[name="mle_action"][value="create_skai_batch"]', card);
+        if (actionInput && actionInput.form && qs('input[name="mle_batch_plan"][value="regular_9_batch"], input[name="mle_batch_plan"][value="regular"], input[name="mle_batch_plan"][value="regular_skai_batch"]', actionInput.form)) {
+          f = actionInput.form;
+        }
+      }
+    }
+
     if (!f && target) {
       actionInput = qs('form input[name="mle_action"][value="create_skai_batch"]', target);
       f = actionInput ? closest(actionInput, 'form') : null;
@@ -7149,6 +7394,10 @@ function mleAdvisoryCardPrint(btn) {
     }
     if (mode === 'horizon_batch') {
       ensureHiddenInput(f, 'mle_batch_plan', 'horizon');
+    }
+    if (mode === 'regular_skai_batch' || mode === 'regular_skai') {
+      ensureHiddenInput(f, 'mle_batch_plan', 'regular_9_batch');
+      ensureHiddenInput(f, 'mle_batch_phase', 'regular');
     }
 
     f.setAttribute('data-mle-v121-action-submit', '1');
@@ -7217,39 +7466,22 @@ function mleAdvisoryCardPrint(btn) {
     var state = btn.getAttribute('data-mle-action-state') || stateFor(btn, card);
     var mode = (btn.getAttribute('data-action-target') || '').toLowerCase();
     var target = explicitTarget(btn, card);
-    if (state === 'action' && mode === 'history_window_check') {
-      var readyHorizonUrl = btn.getAttribute('data-ready-horizon-skai-url') || '';
-      if (readyHorizonUrl) { return openSkaiInNewWindow(readyHorizonUrl); }
-    }
-    if (state === 'action' && mode === 'prediction_9_batch') {
-      var readySettingsUrl = btn.getAttribute('data-ready-settings-skai-url') || '';
-      if (readySettingsUrl) { return openSkaiInNewWindow(readySettingsUrl); }
-    }
-    if (state === 'action' && /^(horizon_ready_batch|settings_ready_batch)$/.test(mode)) {
-      if (openReadyPhaseBatch(card, mode)) { return true; }
-    }
-    if (state === 'action' && mode === 'history_window_check') {
-      if (qs('.mle-open-skai-precision-batch[data-batch-phase="horizon"]', card)) {
-        if (openReadyPhaseBatch(card, 'horizon_ready_batch')) { return true; }
+    if (state === 'action' && /^(history_window_check|prediction_9_batch|horizon_batch|settings_batch|next_settings|precision_batch|run-batch|horizon_ready_batch|settings_ready_batch)$/.test(mode)) {
+      if (typeof window.mleActionJump === 'function') {
+        try { window.mleActionJump(btn); } catch(ignoreJumpAction) {}
+      } else if (target) {
+        flash(target);
+      } else if (batchTarget(card)) {
+        flash(batchTarget(card));
+      } else {
+        flash(card);
       }
-      if (submitActionBatchForm(card, btn, 'horizon_batch')) { return true; }
-    }
-    if (state === 'action' && mode === 'prediction_9_batch') {
-      if (qs('.mle-open-skai-precision-batch[data-batch-phase="settings"]', card)) {
-        if (openReadyPhaseBatch(card, 'settings_ready_batch')) { return true; }
-      }
-      if (submitActionBatchForm(card, btn, 'settings_batch')) { return true; }
-    }
-    if (state === 'action' && /^(next_settings|settings_batch|horizon_batch)$/.test(mode)) {
-      if (submitActionBatchForm(card, btn, mode)) { return true; }
+      return true;
     }
     if (state === 'action' && (mode === 'regular_skai_batch' || mode === 'regular_skai')) {
-      var regularUrl = skaiUrl(card, btn);
-      if (regularUrl) {
-        if (!confirmRegularSkaiBatchOpen()) { return true; }
-        openSkaiInNewWindow(regularUrl);
-        return true;
-      }
+      if (submitActionBatchForm(card, btn, mode)) { return true; }
+      if (window.alert) { window.alert('The tracked 9-run batch form is missing. Please refresh and try again.'); }
+      return true;
     }
     if (state === 'pending') {
       flash(target || pendingTarget(card));
@@ -7776,10 +8008,10 @@ function mleAdvisoryCardPrint(btn) {
       nextActionDescription = 'Batch creation is disabled in demo mode. Open SKAI preview only.';
       fallbackReason = 'demo_mode';
     } else if (canOpenRegularSkai) {
-      nextActionType = 'open_regular_skai';
-      nextActionLabel = 'Open SKAI Global-Learning 9-Batch';
-      nextActionDescription = 'Focus batch is not ready yet; open SKAI regular 9-batch.';
-      fallbackReason = 'focus_batch_not_ready';
+      nextActionType = 'unavailable';
+      nextActionLabel = 'Action Not Ready';
+      nextActionDescription = 'LottoExpert cannot open regular SKAI because the tracked 9-run batch form is missing for this lottery card.';
+      fallbackReason = 'missing_tracked_regular_batch_form';
     } else if (demoMode) {
       nextActionType = 'demo_read_only';
       nextActionLabel = 'Demo Mode - View Only';
@@ -7851,7 +8083,13 @@ function mleAdvisoryCardPrint(btn) {
     debugSnapshot(card,state,{requestSubmitCalled:false,fallbackReviewPendingCalled:false,fallbackReason:''});
     if (state.nextActionType === 'review_pending') { reviewPending(card); return; }
     if (state.nextActionType === 'review_results' || state.nextActionType === 'score_runs') { reviewPending(card); return; }
-    if (state.nextActionType === 'open_regular_skai' || state.nextActionType === 'demo_read_only' || state.nextActionType === 'demo_view_only') {
+    if (state.nextActionType === 'open_regular_skai') {
+      fallbackReason = 'missing_tracked_regular_batch_form';
+      showActionWarning(card,'The tracked 9-run batch form is missing. Please refresh and try again.');
+      debugSnapshot(card,state,{requestSubmitCalled:false,fallbackReviewPendingCalled:false,fallbackReason:fallbackReason});
+      return;
+    }
+    if (state.nextActionType === 'demo_read_only' || state.nextActionType === 'demo_view_only') {
       if (!openSkaiUrl(state.skaiRegularUrl)) {
         fallbackReason = 'missing_skai_url';
         showActionWarning(card,'LottoExpert cannot open SKAI because the lottery URL context is missing.');
@@ -7896,9 +8134,8 @@ function mleAdvisoryCardPrint(btn) {
       return;
     }
     if(b){ b.click(); debugSnapshot(card,state,{requestSubmitCalled:false,fallbackReviewPendingCalled:false,fallbackReason:''}); return; }
-    if(openSkaiUrl(state.skaiRegularUrl)){ debugSnapshot(card,state,{requestSubmitCalled:false,fallbackReviewPendingCalled:false,fallbackReason:'open_regular_skai_fallback'}); return; }
     fallbackReviewPendingCalled = true;
-    fallbackReason = 'no_submit_button_no_skai_url';
+    fallbackReason = 'missing_batch_submit_control';
     showActionWarning(card,'LottoExpert cannot create this batch because the submit control is missing.');
     reviewPending(card);
     debugSnapshot(card,state,{requestSubmitCalled:requestSubmitCalled,fallbackReviewPendingCalled:fallbackReviewPendingCalled,fallbackReason:fallbackReason});
@@ -7987,8 +8224,9 @@ function mleAdvisoryCardPrint(btn) {
     var pathRenderState = (mode==='pending'?'pending':(mode==='result'?'result':(mode==='score'?'score':((actionState.nextActionType==='unavailable')?'unavailable':((actionState.nextActionType==='demo_read_only'||actionState.nextActionType==='demo_view_only')?'demo':'action')))));
     var ctaAction = mode==='pending' ? 'review' : (mode==='result' ? 'print-after' : (mode==='score' ? 'review' : (actionState.nextActionType==='create_focus_batch' ? 'run-batch' : (actionState.nextActionType==='open_regular_skai' ? 'open-skai' : ((actionState.nextActionType==='demo_read_only' || actionState.nextActionType==='demo_view_only') ? 'demo-view' : 'unavailable')))));
     var ctaClass = mode==='pending' ? 'mle-v73-btn--green' : (mode==='result' ? 'mle-v73-btn--green' : (mode==='score' ? 'mle-v73-btn--amber' : (actionState.nextActionType==='open_regular_skai' ? 'mle-v73-btn--blue' : (actionState.nextActionType==='unavailable' ? 'mle-v73-btn--soft' : ((actionState.nextActionType==='demo_read_only' || actionState.nextActionType==='demo_view_only') ? 'mle-v73-btn--soft' : 'mle-v73-btn--amber')))));
-    var ctaDisabled = (actionState.nextActionType==='unavailable') ? ' aria-disabled="true"' : '';
-    var warningText = actionState.nextActionType==='unavailable' ? 'LottoExpert cannot create this batch because the batch form or lottery context is missing.' : '';
+    var unavailableMessage = 'This action is not ready because the batch controls for this lottery are missing. Please refresh this page. If the problem continues, contact support before trying again.';
+    var ctaDisabled = (actionState.nextActionType==='unavailable') ? ' aria-disabled="true" disabled="disabled" data-mle-disabled-message="'+esc(unavailableMessage)+'" title="'+esc(unavailableMessage)+'"' : '';
+    var warningText = actionState.nextActionType==='unavailable' ? unavailableMessage : '';
     var html='<section class="mle-v73-path mle-v73-path--'+esc(stateClass)+'" aria-label="Recommendation path for '+esc(name)+'" data-mle-path-owner="V73_build" data-mle-path-render-time="'+esc(String(pathRenderTime))+'" data-mle-path-card-title="'+esc(name)+'" data-mle-path-state="'+esc(pathRenderState)+'" data-mle-path-pending-count="'+esc(String(p))+'" data-mle-path-render-sequence="'+esc(String(pathRenderSeq))+'">'+
       '<div class="mle-v73-path__top"><div><span class="mle-v73-path__eyebrow">Recommendation Path</span><h4>'+esc(topTitle)+'</h4><p>This summary replaces the repeated chooser/advice text. It tells you what has been done, where the lottery stands, and what to do next.</p></div><span class="mle-v73-pill">'+esc(primary)+'</span></div>'+
       '<div class="mle-v73-path__body"><div class="mle-v73-main"><div><span class="mle-v73-kicker">Current Status</span><h5>'+esc(mainTitle)+'</h5><p>'+esc(mainBody)+'</p>'+buildCliffNotes(card, actionState)+'</div><div class="mle-v73-main__actions">';
@@ -8025,6 +8263,11 @@ function mleAdvisoryCardPrint(btn) {
   document.addEventListener('click',function(e){
     var b=e.target&&e.target.closest?e.target.closest('[data-mle-v73-action],[data-mle-v73-jump-section]'):null;if(!b){return;}
     var card=closest(b,'.mle-advisory-card');if(!card){return;}
+    if((b.disabled!==undefined&&b.disabled)||b.getAttribute('aria-disabled')==='true'){
+      e.preventDefault();e.stopPropagation();if(e.stopImmediatePropagation){e.stopImmediatePropagation();}
+      showActionWarning(card,b.getAttribute('data-mle-disabled-message')||'This action is not ready because the batch controls for this lottery are missing. Please refresh this page and try again.');
+      return;
+    }
     e.preventDefault();e.stopPropagation();if(e.stopImmediatePropagation){e.stopImmediatePropagation();}
     var jumpTarget=b.getAttribute('data-mle-v73-jump-section');
     if(jumpTarget){jumpToSection(card,jumpTarget);return;}

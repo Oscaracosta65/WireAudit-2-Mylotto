@@ -42,6 +42,8 @@
 
 defined('_JEXEC') or die;
 
+define('MLE_SKAI_PHP_BUILD', '20260601');
+
 // [[SKAI_LOG_WARNINGS_HOTFIX_2026_05_15]] Hardened validation return shape and daily pick-size fallback.
 
 
@@ -57,6 +59,102 @@ if (!function_exists('skai_debug_log')) {
         // To re-enable during local debugging only, change the path to a directory
         // outside the web root (e.g. JPATH_ADMINISTRATOR . '/logs/skai_save_debug.log').
         return;
+    }
+}
+if (!function_exists('mylottoexpertNormalizeLotteryIdList')) {
+    function mylottoexpertNormalizeLotteryIdList($value)
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                $value = $decoded;
+            } else {
+                $value = preg_split('/[^0-9]+/', $value);
+            }
+        }
+        $out = array();
+        foreach ((array)$value as $v) {
+            $id = (int)$v;
+            if ($id > 0) { $out[$id] = $id; }
+        }
+        ksort($out);
+        return array_values($out);
+    }
+}
+if (!function_exists('mylottoexpertGetHiddenLotteryIds')) {
+    function mylottoexpertGetHiddenLotteryIds($db, $userId)
+    {
+        $userId = (int)$userId;
+        if ($userId <= 0) { return array(); }
+        $q = $db->getQuery(true)
+            ->select($db->quoteName('profile_value'))
+            ->from($db->quoteName('#__user_profiles'))
+            ->where($db->quoteName('user_id') . ' = ' . $userId)
+            ->where($db->quoteName('profile_key') . ' = ' . $db->quote('mylotto.hidden_lottery_ids'))
+            ->order($db->quoteName('ordering') . ' ASC')
+            ->setLimit(1);
+        $db->setQuery($q);
+        $raw = $db->loadResult();
+        if ($raw === null || $raw === '') { return array(); }
+        $decoded = json_decode((string)$raw, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            if (is_string($decoded)) { $raw = $decoded; }
+            elseif (is_array($decoded)) { return mylottoexpertNormalizeLotteryIdList($decoded); }
+        }
+        return mylottoexpertNormalizeLotteryIdList((string)$raw);
+    }
+}
+if (!function_exists('mylottoexpertSetHiddenLotteryIds')) {
+    function mylottoexpertSetHiddenLotteryIds($db, $userId, array $ids)
+    {
+        $userId = (int)$userId;
+        if ($userId <= 0) { return false; }
+        $value = json_encode(mylottoexpertNormalizeLotteryIdList($ids));
+        $stored = json_encode((string)$value);
+        $existsQ = $db->getQuery(true)
+            ->select('COUNT(*)')
+            ->from($db->quoteName('#__user_profiles'))
+            ->where($db->quoteName('user_id') . ' = ' . $userId)
+            ->where($db->quoteName('profile_key') . ' = ' . $db->quote('mylotto.hidden_lottery_ids'));
+        $db->setQuery($existsQ);
+        $exists = ((int)$db->loadResult() > 0);
+        if ($exists) {
+            $q = $db->getQuery(true)
+                ->update($db->quoteName('#__user_profiles'))
+                ->set($db->quoteName('profile_value') . ' = ' . $db->quote($stored))
+                ->where($db->quoteName('user_id') . ' = ' . $userId)
+                ->where($db->quoteName('profile_key') . ' = ' . $db->quote('mylotto.hidden_lottery_ids'));
+        } else {
+            $q = $db->getQuery(true)
+                ->insert($db->quoteName('#__user_profiles'))
+                ->columns(array($db->quoteName('user_id'), $db->quoteName('profile_key'), $db->quoteName('profile_value'), $db->quoteName('ordering')))
+                ->values($userId . ',' . $db->quote('mylotto.hidden_lottery_ids') . ',' . $db->quote($stored) . ',0');
+        }
+        $db->setQuery($q);
+        $db->execute();
+        return true;
+    }
+}
+if (!function_exists('mylottoexpertUnhideLotteryForUser')) {
+    function mylottoexpertUnhideLotteryForUser($db, $userId, $lotteryId)
+    {
+        $userId = (int)$userId;
+        $lotteryId = (int)$lotteryId;
+        if ($userId <= 0 || $lotteryId <= 0) { return false; }
+        $hiddenIds = mylottoexpertGetHiddenLotteryIds($db, $userId);
+        $changed = false;
+        $next = array();
+        foreach ((array)$hiddenIds as $id) {
+            $id = (int)$id;
+            if ($id <= 0) { continue; }
+            if ($id === $lotteryId) {
+                $changed = true;
+                continue;
+            }
+            $next[$id] = $id;
+        }
+        if ($changed) { mylottoexpertSetHiddenLotteryIds($db, $userId, array_values($next)); }
+        return $changed;
     }
 }
 
@@ -163,6 +261,24 @@ if ($isDebug) {
 }
 
 ini_set('error_log', JPATH_ADMINISTRATOR . '/logs/skai_error.log');
+if (!function_exists('skai_safe_save_error_log')) {
+    function skai_safe_save_error_log($message) {
+        $msg = preg_replace('/[\x00-\x1F\x7F]/', ' ', (string)$message);
+        $msg = trim(preg_replace('/\s+/', ' ', $msg));
+        if ($msg === '') { return; }
+        $line = '[' . gmdate('Y-m-d H:i:s') . ' UTC] ' . substr($msg, 0, 3000) . PHP_EOL;
+        $path = JPATH_ADMINISTRATOR . '/logs/skai_save_ajax.log';
+        try {
+            $dir = dirname($path);
+            if (!is_dir($dir)) { @mkdir($dir, 0755, true); }
+            if (@file_put_contents($path, $line, FILE_APPEND | LOCK_EX) === false) {
+                error_log('[SKAI SAVE LOG FALLBACK] ' . substr($msg, 0, 1000));
+            }
+        } catch (\Throwable $_skaiLogEx) {
+            error_log('[SKAI SAVE LOG EXCEPTION] ' . $_skaiLogEx->getMessage() . ' | ' . substr($msg, 0, 800));
+        }
+    }
+}
 
 // [[SKAI_RUNTIME_WARNING_GUARDS_2026_05_15]]
 // Safe defaults for paths that can be reached before optional state blocks assign values.
@@ -578,14 +694,18 @@ if ($skaiMaintenanceBlockCurrentUser && $in->getMethod() === 'POST') {
         || ((string)$in->getString('skai_action', '') !== '')
         || ((int)$in->getInt('batch_save_mode', 0) === 1);
     if ($isSkaiMutation) {
+        while (ob_get_level() > 0) { @ob_end_clean(); }
         try {
             $app->setHeader('Content-Type', 'application/json; charset=utf-8', true);
+            $app->setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0', true);
             $app->sendHeaders();
         } catch (\Throwable $_skaiMaintHeaderEx) {
             @header('Content-Type: application/json; charset=utf-8');
+            @header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
         }
         echo json_encode(array(
             'ok' => false,
+            'reason' => 'maintenance_active',
             'maintenance' => true,
             'error' => 'skai_maintenance_active',
             'message' => $skaiMaintenanceMessage
@@ -667,12 +787,18 @@ $gameId = $gameIdRaw; // string; do NOT cast to int here
 // when browser storage is not available after a redirect.
 // ========================================================================
 $skaiMleServerBatchPayload = null;
-$skaiMleServerBatchStatus = array('requested' => false, 'batch_id' => 0, 'loaded' => false, 'reason' => 'not_requested', 'row_count' => 0);
+$skaiMleServerBatchStatus = array('requested' => false, 'guided_requested' => false, 'batch_id' => 0, 'loaded' => false, 'reason' => 'not_requested', 'row_count' => 0, 'required_action' => '', 'warning_message' => '');
 try {
-    $skaiMleBatchRequested = ((int)$in->getInt('mle_skai_batch', 0) === 1);
+    $skaiMleGuidedMode = strtolower(trim((string)$in->getCmd('mle_guided_mode', '')));
+    $skaiMleRequiredAction = strtolower(trim((string)$in->getCmd('mle_required_action', '')));
     $skaiMleBatchId = (int)$in->getInt('batch_id', 0);
+    $skaiMleLotteryId = (int)$in->getInt('lottery_id', 0);
+    $skaiMleBatchRequested = ((int)$in->getInt('mle_skai_batch', 0) === 1) || ($skaiMleBatchId > 0 && $skaiMleGuidedMode === 'required');
+    $skaiMleGuidedRequested = ($skaiMleBatchId > 0 && $skaiMleGuidedMode === 'required');
     $skaiMleServerBatchStatus['requested'] = (bool)$skaiMleBatchRequested;
+    $skaiMleServerBatchStatus['guided_requested'] = (bool)$skaiMleGuidedRequested;
     $skaiMleServerBatchStatus['batch_id'] = (int)$skaiMleBatchId;
+    $skaiMleServerBatchStatus['required_action'] = (string)$skaiMleRequiredAction;
     if ($skaiMleBatchRequested) { $skaiMleServerBatchStatus['reason'] = 'requested'; }
     if ($skaiMleBatchRequested && $skaiMleBatchId > 0 && !$currUser->guest) {
         $skaiMleDb = Factory::getDbo();
@@ -690,6 +816,17 @@ try {
                 ->setLimit(1);
             $skaiMleDb->setQuery($skaiMleHq);
             $skaiMleHeader = $skaiMleDb->loadAssoc();
+            // [[MLE_BATCH_LOTTERY_GUARD]] Reject batch if its lottery_id does not match the
+            // current page lottery_id supplied in the URL. This prevents a batch that belongs
+            // to one lottery (e.g. Washington Hit 5, batch_id=59) from being loaded and used
+            // on a SKAI session for a different lottery (e.g. Florida Fantasy 5).
+            if (is_array($skaiMleHeader) && !empty($skaiMleHeader)) {
+                $skaiMleHeaderLotIdCheck = (int)($skaiMleHeader['lottery_id'] ?? 0);
+                if ($skaiMleLotteryId > 0 && $skaiMleHeaderLotIdCheck > 0 && $skaiMleHeaderLotIdCheck !== $skaiMleLotteryId) {
+                    $skaiMleServerBatchStatus['reason'] = 'lottery_id_mismatch';
+                    $skaiMleHeader = null;
+                }
+            }
             if (is_array($skaiMleHeader) && !empty($skaiMleHeader)) {
                 $skaiMleServerBatchStatus['reason'] = 'header_found';
                 // Header ownership above is the primary security gate. Child rows are
@@ -788,7 +925,12 @@ try {
                     $skaiMleServerBatchStatus['loaded'] = true;
                     $skaiMleServerBatchStatus['reason'] = 'loaded';
                 } else {
-                    $skaiMleServerBatchStatus['reason'] = 'run_count_not_9';
+                    if ($skaiMleGuidedRequested) {
+                        $skaiMleServerBatchStatus['reason'] = 'incomplete_guided_batch';
+                        $skaiMleServerBatchStatus['warning_message'] = 'The requested guided batch is incomplete and cannot be loaded safely. Please return to MyLottoExpert and create/open a fresh tracked 9-run batch.';
+                    } else {
+                        $skaiMleServerBatchStatus['reason'] = 'run_count_not_9';
+                    }
                 }
             } else {
                 $skaiMleServerBatchStatus['reason'] = 'header_not_found_for_user';
@@ -805,6 +947,12 @@ try {
     $skaiMleServerBatchStatus['reason'] = 'exception';
     error_log('[SKAI_MLE_BATCH_BRIDGE] Could not load MyLottoExpert batch: ' . $skaiMleBridgeEx->getMessage());
     $skaiMleServerBatchPayload = null;
+}
+if (!empty($skaiMleServerBatchStatus['guided_requested']) && empty($skaiMleServerBatchStatus['loaded'])) {
+    if (empty($skaiMleServerBatchStatus['warning_message'])) {
+        $skaiMleServerBatchStatus['warning_message'] = 'The requested guided batch was not loaded. Please return to MyLottoExpert and open a tracked 9-run batch again.';
+    }
+    try { Factory::getApplication()->enqueueMessage((string)$skaiMleServerBatchStatus['warning_message'], 'warning'); } catch (\Throwable $skaiMleWarnEx) { }
 }
 try {
     $doc->addScriptDeclaration('window.SKAI_MLE_SERVER_BATCH_PAYLOAD = ' . json_encode($skaiMleServerBatchPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . '; window.SKAI_MLE_SERVER_BATCH_STATUS = ' . json_encode($skaiMleServerBatchStatus, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . ';');
@@ -13226,6 +13374,11 @@ function skaiEnsureUserSavedNumbersCols()
             'target_draw_at'                => "DATETIME NULL COMMENT 'Canonical draw timestamp bound at save time'",
             'target_draw_session'           => "VARCHAR(40) NULL COMMENT 'Canonical draw session bound at save time'",
             'target_timezone_id'            => "VARCHAR(64) NULL COMMENT 'Timezone used to resolve the canonical target'",
+            // [[MLE_DRAW_TZ_FIX_2026]] Draw timezone traceability fields
+            'target_draw_timezone'          => "VARCHAR(64) NULL COMMENT 'Official lottery draw timezone e.g. America/New_York'",
+            'target_draw_label'             => "VARCHAR(191) NULL COMMENT 'Human-readable draw label with timezone e.g. Draw: Jun 3 2026 ET'",
+            'target_draw_source'            => "VARCHAR(80) NULL COMMENT 'Source path used to resolve the draw timezone'",
+            'target_draw_resolution_note'   => "TEXT NULL COMMENT 'Resolution trace note for official draw timezone'",
             'target_prediction_family'      => "VARCHAR(30) NULL COMMENT 'regular or daily for canonical target'",
             'target_prediction_type'        => "VARCHAR(50) NULL COMMENT 'prediction type bound into canonical target'",
             'target_pick_size'              => "TINYINT NULL COMMENT 'Pick size bound into canonical target'",
@@ -15243,7 +15396,7 @@ try {
 $allowedGroups    = [14, 8];
 $userGroups       = $user->groups ?? [];
 $skaiCanAdminSave = !$user->guest && $user->authorise('core.admin');
-$isMember         = $skaiCanAdminSave || (bool) array_intersect($allowedGroups, $userGroups);
+$isMember         = (!$user->guest && ($skaiCanAdminSave || (bool) array_intersect($allowedGroups, $userGroups)));
 
 if (!$isMember) {
     if ($skaiBatchSaveMode) {
@@ -16293,30 +16446,79 @@ $labelInput = implode(' - ', $parts);
             $label   = $labelInput !== '' ? $labelInput : ('SKAI - ' . $lotName . ' - ' . $dateNow);
         }
 
-        // Compute timestamps with timezone awareness
-        // Priority: Joomla user profile timezone -> site timezone -> fallback
+        // [[MLE_DRAW_TZ_FIX_2026]] Compute timestamps with lottery-timezone-aware priority.
+        // Priority for DRAW TIMEZONE (target_draw_date / target_draw_at / target_timezone_id):
+        //   1. Lottery-specific timezone from lotteryConfig or known draw-family defaults
+        //   2. Site-configured timezone
+        //   (User profile timezone is intentionally NOT used for draw-date authority)
+        // $siteTz is still used for "now" timestamps (utc_epoch, user_local_datetime) and
+        // for the cosmetic label only.
+
+        // --- Resolve lottery draw timezone ---
+        $lotteryTz = '';
+        // 1a. From loaded lotteryConfig
+        if (empty($lotteryTz)) {
+            $lotteryTz = trim((string)($lotteryConfig['timezone_id'] ?? $lotteryConfig['draw_timezone'] ?? ''));
+        }
+        // 1b. Known draw-family defaults (game_id prefix match)
+        if (empty($lotteryTz) && isset($selectedGameId)) {
+            $__gidU = strtoupper((string)$selectedGameId);
+            if (strncmp($__gidU, 'PB', 2) === 0 || strncmp($__gidU, 'POWERBALL', 9) === 0 ||
+                strncmp($__gidU, 'MEGAMILLIONS', 12) === 0 || strncmp($__gidU, 'MEGA_MILLIONS', 13) === 0 ||
+                strncmp($__gidU, 'MM', 2) === 0) {
+                $lotteryTz = 'America/New_York';
+            }
+            unset($__gidU);
+        }
+        // 1c. Safe state/game fallback mapping when timezone metadata is missing.
+        if (empty($lotteryTz)) {
+            $__gidState = strtoupper((string)($selectedGameId ?? ''));
+            $__lotNameState = strtoupper(trim((string)($lotteryConfig['lottery_name'] ?? $lotteryConfig['game_name'] ?? $lotteryConfig['name'] ?? '')));
+            $__stateCode = '';
+            if (preg_match('/^(CA|TX|FL|WA)[A-Z0-9_\-]*/', $__gidState, $__stateMatch)) {
+                $__stateCode = (string)$__stateMatch[1];
+            } elseif (strpos($__lotNameState, 'CALIFORNIA') !== false) {
+                $__stateCode = 'CA';
+            } elseif (strpos($__lotNameState, 'TEXAS') !== false) {
+                $__stateCode = 'TX';
+            } elseif (strpos($__lotNameState, 'FLORIDA') !== false) {
+                $__stateCode = 'FL';
+            } elseif (strpos($__lotNameState, 'WASHINGTON') !== false) {
+                $__stateCode = 'WA';
+            }
+            $__stateTzMap = array(
+                'CA' => 'America/Los_Angeles',
+                'TX' => 'America/Chicago',
+                'FL' => 'America/New_York',
+                'WA' => 'America/Los_Angeles',
+            );
+            if ($__stateCode !== '' && isset($__stateTzMap[$__stateCode])) {
+                $lotteryTz = (string)$__stateTzMap[$__stateCode];
+            }
+            unset($__stateTzMap, $__stateCode, $__gidState, $__lotNameState, $__stateMatch);
+        }
+        // Validate lottery timezone
+        if ($lotteryTz !== '') {
+            try { new \DateTimeZone($lotteryTz); } catch (\Throwable $__) { $lotteryTz = ''; }
+        }
+
+        // --- Resolve site timezone (for "now" display timestamps only) ---
         $userTz = null;
         try {
-            $userParams = $user->getParameters();
-            $userTz = $userParams->get('timezone', null);
-        } catch (\Throwable $__) {}
-        
-        if (empty($userTz)) {
-            try {
-                $siteConfig = Factory::getConfig();
-                $userTz = $siteConfig->get('offset', 'America/New_York');
-            } catch (\Throwable $__) {
-                $userTz = 'America/New_York';
-            }
+            $siteConfig = Factory::getConfig();
+            $userTz = $siteConfig->get('offset', 'America/New_York');
+        } catch (\Throwable $__) {
+            $userTz = 'America/New_York';
         }
-        
-        // Validate timezone identifier
+        // Validate site timezone
         try {
             $testTz = new \DateTimeZone($userTz);
         } catch (\Throwable $__) {
             $userTz = 'America/New_York';
         }
-        
+
+        // Use lottery timezone for draw-date calculations; site timezone for display timestamps
+        $drawTz = ($lotteryTz !== '') ? $lotteryTz : $userTz;
         $siteTz = $userTz;
         $nowDate = new Date('now', $siteTz);
         $nowSql = $nowDate->toSql();
@@ -16327,7 +16529,7 @@ $labelInput = implode(' - ', $parts);
         // Store user local datetime string (for dashboard display)
         $userLocalDatetime = $nowDate->format('Y-m-d H:i:s', true);
         
-        // Store timezone identifier (IANA format)
+        // Store timezone identifier (IANA format) - records site TZ for dashboard
         $timezoneId = $siteTz;
 
         // --- Sanitize lengths (defensive; no schema changes) ---
@@ -16342,50 +16544,206 @@ $labelInput = implode(' - ', $parts);
             $evidenceJson = null;
         }
 
-        // Optional next_draw_date/next_draw_at - prefer POST, then DB meta, then config; else NULL
-        // CHG: DO NOT reset to NULL here. These may already be resolved above from POST/meta.
+        // Optional next_draw_date/next_draw_at - prefer POST, then DB meta, then config; else NULL.
+        // [[MLE_DRAW_TZ_FIX_2026]] Batch run full_settings_json target draw fields are authoritative.
         $nextDrawDateSql = (isset($nextDrawDateSql) && trim((string)$nextDrawDateSql) !== '')
             ? substr(trim((string)$nextDrawDateSql), 0, 10)
             : null;
-
         $nextDrawAtSql = (isset($nextDrawAtSql) && trim((string)$nextDrawAtSql) !== '')
             ? (string)$nextDrawAtSql
             : null;
-
-
-        // 1) Prefer an explicit posted next_draw_date if present (for parity with other modules)
-        $postedNext = trim((string) $in->getString('next_draw_date', ''));
-        if ($postedNext !== '') {
-            // Store as simple YYYY-MM-DD (strip time if any); validate format strictly
-            $postedNextDate = substr($postedNext, 0, 10);
-            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $postedNextDate) && strtotime($postedNextDate) !== false) {
-                $nextDrawDateSql = $postedNextDate;
+        $skaiBatchTargetDraw = array(
+            'has_valid_target_draw_date' => false,
+            'target_draw_date' => null,
+            'target_draw_at' => null,
+            'target_draw_timezone' => null,
+            'target_draw_label' => null,
+            'target_draw_source' => null,
+            'target_draw_resolution_note' => null,
+            'target_draw_at_tz' => null,
+        );
+        $skaiSourceBatchRunId = (int)$in->getInt('source_batch_run_id', 0);
+        $skaiSourceBatchIdForTarget = (int)$in->getInt('source_batch_id', 0);
+        $skaiSourceBatchRunOrderForTarget = (int)$in->getInt('source_batch_run_order', 0);
+        $skaiPostedBatchIdForTarget = (int)$in->getInt('batch_id', 0);
+        $skaiPostedBatchIndexForTarget = (int)$in->getInt('batch_save_index', 0);
+        $skaiCachedBatchHeaderRow = null;
+        $skaiCachedBatchRunRow = null;
+        if ($skaiPostedBatchIndexForTarget <= 0) { $skaiPostedBatchIndexForTarget = (int)$in->getInt('batch_index', 0); }
+        $skaiPostedBatchContextForTarget = ((int)$in->getInt('mle_skai_batch', 0) === 1);
+        if ($skaiSourceBatchIdForTarget <= 0 && $skaiPostedBatchContextForTarget && $skaiPostedBatchIdForTarget > 0) {
+            $skaiSourceBatchIdForTarget = (int)$skaiPostedBatchIdForTarget;
+        }
+        if ($skaiSourceBatchRunOrderForTarget <= 0 && $skaiPostedBatchIndexForTarget > 0) {
+            $skaiSourceBatchRunOrderForTarget = (int)$skaiPostedBatchIndexForTarget;
+        }
+        // [[SKAI_BATCH_TARGET_FIX_2026_06_02]] Canonical lookup is batch_id + run_order only.
+        // source_batch_run_id is NOT used as the primary path because in admin/hive/research
+        // contexts it may contain a hive assignment id, not the mle_skai_batch_run primary key.
+        // Using it as a primary path caused the wrong full_settings_json to be loaded, leaving
+        // has_valid_target_draw_date false and the save falling back to the live resolver date.
+        $skaiCanLookupByBatchRun = ($skaiSourceBatchIdForTarget > 0 && $skaiSourceBatchRunOrderForTarget > 0);
+        $skaiCanFallbackByRunId  = (!$skaiCanLookupByBatchRun && $skaiSourceBatchRunId > 0);
+        if ($skaiCanLookupByBatchRun || $skaiCanFallbackByRunId) {
+            try {
+                if ($skaiSourceBatchIdForTarget > 0) {
+                    $skaiHeaderOwnerQ = $db->getQuery(true)
+                        ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
+                        ->from($db->quoteName('#__mle_skai_batch_header'))
+                        ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchIdForTarget)
+                        ->where($db->quoteName('user_id') . ' = ' . (int)$user->id)
+                        ->setLimit(1);
+                    $db->setQuery($skaiHeaderOwnerQ);
+                    $skaiCachedBatchHeaderRow = $db->loadAssoc();
+                    $skaiHeaderOwnerId = (int)($skaiCachedBatchHeaderRow['id'] ?? 0);
+                    if ($skaiHeaderOwnerId <= 0) {
+                        $skaiCanLookupByBatchRun = false;
+                        $skaiCanFallbackByRunId = false;
+                    }
+                }
+            } catch (\Throwable $__skaiBatchOwnerGuardEx) {
+                $skaiCanLookupByBatchRun = false;
+                $skaiCanFallbackByRunId = false;
             }
-            // If format is invalid, $nextDrawDateSql stays at its current value (from DB meta)
+        }
+        if ($skaiCanLookupByBatchRun || $skaiCanFallbackByRunId) {
+            try {
+                $skaiRunTables = array_map('strtolower', array_keys((array)$db->getTableList()));
+                $skaiRunTable  = strtolower(str_replace('#__', $db->getPrefix(), '#__mle_skai_batch_run'));
+                if (in_array($skaiRunTable, $skaiRunTables, true)) {
+                    $skaiRunQ = $db->getQuery(true)
+                        ->select(array($db->quoteName('id'), $db->quoteName('full_settings_json'), $db->quoteName('batch_id'), $db->quoteName('run_order')))
+                        ->from($db->quoteName('#__mle_skai_batch_run'));
+                    if ($skaiCanLookupByBatchRun) {
+                        $skaiRunQ
+                            ->where($db->quoteName('batch_id') . ' = ' . (int)$skaiSourceBatchIdForTarget)
+                            ->where($db->quoteName('run_order') . ' = ' . (int)$skaiSourceBatchRunOrderForTarget)
+                            ->order($db->quoteName('id') . ' DESC');
+                    } else {
+                        $skaiRunQ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchRunId);
+                    }
+                    $db->setQuery($skaiRunQ, 0, 1);
+                    $skaiRunRow = $db->loadAssoc();
+                    $skaiCachedBatchRunRow = is_array($skaiRunRow) ? $skaiRunRow : null;
+                    $skaiRunJson = ($skaiRunRow !== null) ? (string)($skaiRunRow['full_settings_json'] ?? '') : '';
+                    // Secondary fallback: verify the loaded row belongs to the declared source batch
+                    // when source_batch_id is known. Discard if batch_id does not match.
+                    if ($skaiCanFallbackByRunId && $skaiSourceBatchIdForTarget > 0 && $skaiRunRow !== null) {
+                        if ((int)($skaiRunRow['batch_id'] ?? 0) !== $skaiSourceBatchIdForTarget) {
+                            $skaiRunJson = '';
+                        }
+                    }
+                    if ($skaiRunJson !== '') {
+                        $skaiRunSettings = json_decode($skaiRunJson, true);
+                        if (json_last_error() === JSON_ERROR_NONE && is_array($skaiRunSettings)) {
+                            $runTdd = trim((string)($skaiRunSettings['target_draw_date'] ?? ''));
+                            if ($runTdd !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $runTdd) && strtotime($runTdd) !== false) {
+                                $skaiBatchTargetDraw['has_valid_target_draw_date'] = true;
+                                $skaiBatchTargetDraw['target_draw_date'] = $runTdd;
+                            }
+                            $runTdtz = trim((string)($skaiRunSettings['target_draw_timezone'] ?? ''));
+                            if ($runTdtz !== '') {
+                                try {
+                                    new \DateTimeZone($runTdtz);
+                                    $skaiBatchTargetDraw['target_draw_timezone'] = $runTdtz;
+                                } catch (\Throwable $__) {}
+                            }
+                            $runTdatTz = trim((string)($skaiRunSettings['target_draw_at_tz'] ?? ''));
+                            if ($runTdatTz !== '') {
+                                try {
+                                    new \DateTimeZone($runTdatTz);
+                                    $skaiBatchTargetDraw['target_draw_at_tz'] = $runTdatTz;
+                                } catch (\Throwable $__) {}
+                            }
+                            $runTda = trim((string)($skaiRunSettings['target_draw_at'] ?? ''));
+                            if ($runTda !== '') {
+                                try {
+                                    $runAtTz = (string)($skaiBatchTargetDraw['target_draw_at_tz'] ?? $skaiBatchTargetDraw['target_draw_timezone'] ?? $drawTz);
+                                    $skaiBatchTargetDraw['target_draw_at'] = (new Date($runTda, $runAtTz))->toSql();
+                                } catch (\Throwable $__) {}
+                            }
+                            $runTdl = trim((string)($skaiRunSettings['target_draw_label'] ?? ''));
+                            if ($runTdl !== '') {
+                                $skaiBatchTargetDraw['target_draw_label'] = mb_substr($runTdl, 0, 191, 'UTF-8');
+                            }
+                            $runTds = trim((string)($skaiRunSettings['target_draw_source'] ?? ''));
+                            if ($runTds !== '') {
+                                $skaiBatchTargetDraw['target_draw_source'] = mb_substr($runTds, 0, 80, 'UTF-8');
+                            }
+                            $runTdrn = trim((string)($skaiRunSettings['target_draw_resolution_note'] ?? ''));
+                            $__skaiTraceBatchDateSeen = ($runTdd !== '' ? str_replace('-', '_', substr($runTdd, 0, 10)) : 'missing');
+                            $__skaiTraceLoadMode = $skaiCanLookupByBatchRun ? 'loaded_by_batch_id_run_order' : 'loaded_by_source_batch_run_id_fallback';
+                            $__skaiTraceMarker = 'actual_live_file_marker_2026_06_02|' . $__skaiTraceLoadMode . '|batch_json_date_seen_' . $__skaiTraceBatchDateSeen;
+                            $skaiBatchTargetDraw['target_draw_resolution_note'] = ($runTdrn !== '' ? ($runTdrn . ' | ') : '') . $__skaiTraceMarker;
+                        }
+                    } else {
+                        $skaiBatchTargetDraw['target_draw_resolution_note'] = 'actual_live_file_marker_2026_06_02|loaded_by_batch_id_run_order|batch_json_date_seen_missing|batch_json_missing_for_run_order';
+                    }
+                }
+                unset($skaiCanLookupByBatchRun, $skaiCanFallbackByRunId, $skaiRunQ, $skaiRunRow, $skaiRunJson, $skaiRunSettings, $runTdd, $runTda, $runTdtz, $runTdl, $runTds, $runTdrn, $runTdatTz, $runAtTz, $skaiRunTable, $skaiRunTables);
+            } catch (\Throwable $__) { /* ignore and use resolver fallback */ }
+        }
+        if (!empty($skaiBatchTargetDraw['has_valid_target_draw_date'])) {
+            $nextDrawDateSql = (string)$skaiBatchTargetDraw['target_draw_date'];
+            if (!empty($skaiBatchTargetDraw['target_draw_at'])) {
+                $nextDrawAtSql = (string)$skaiBatchTargetDraw['target_draw_at'];
+            } else {
+                $nextDrawAtSql = null;
+            }
+            if (!empty($skaiBatchTargetDraw['target_draw_timezone'])) {
+                $drawTz = (string)$skaiBatchTargetDraw['target_draw_timezone'];
+            }
+        } else {
+            // 1) Prefer an explicit posted next_draw_date if present (for parity with other modules)
+            $postedNext = trim((string) $in->getString('next_draw_date', ''));
+            if ($postedNext !== '') {
+                $postedNextDate = substr($postedNext, 0, 10);
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $postedNextDate) && strtotime($postedNextDate) !== false) {
+                    $nextDrawDateSql = $postedNextDate;
+                }
+            }
         }
 
-        // 2) Fallbacks from DB meta and config (only if POST was empty)
+        // 2) Fallbacks from DB meta and config (only if authoritative batch date is missing/invalid)
         $ndd = $skaiDbMeta['next_draw_date'] ?? null;
         $nda = $skaiDbMeta['next_draw_at']   ?? null;
-
-        // Parse next-draw timestamps using site TZ, fall back to config if meta missing
-        try {
-            if ($nextDrawDateSql === null && !empty($ndd)) {
-                // Store as DATE in Y-m-d format for next_draw_date
-                $nextDrawDateSql = (new Date($ndd, $siteTz))->format('Y-m-d', true);
-            } elseif ($nextDrawDateSql === null && !empty($lotteryConfig['next_draw_date'])) {
-                $nextDrawDateSql = (new Date($lotteryConfig['next_draw_date'], $siteTz))->format('Y-m-d', true);
-            }
-        } catch (\Throwable $e) { /* ignore; leave as NULL */ }
-
-        // 3) Final fallback: proven backward scan in draw table
-        if ($nextDrawDateSql === null && !empty($dbCol)) {
+        if (empty($skaiBatchTargetDraw['has_valid_target_draw_date'])) {
+            // [[MLE_DRAW_TZ_FIX_2026]] Parse next-draw timestamps using LOTTERY timezone ($drawTz),
+            // not site/user timezone ($siteTz).  This prevents midnight-UTC rollover from shifting
+            // the draw date forward when the server is UTC but the draw occurs in Eastern time.
             try {
-                $fallbackNdd = getNextDrawDate($selectedGameId, $db, $dbCol);
-                if (!empty($fallbackNdd)) {
-                    $nextDrawDateSql = (new Date($fallbackNdd, $siteTz))->format('Y-m-d', true);
+                if ($nextDrawDateSql === null && !empty($ndd)) {
+                    if (preg_match('/^(\d{4}-\d{2}-\d{2})/', (string)$ndd, $__nm)) {
+                        $nextDrawDateSql = $__nm[1];
+                    } else {
+                        $nextDrawDateSql = (new Date($ndd, $drawTz))->format('Y-m-d', true);
+                    }
+                    unset($__nm);
+                } elseif ($nextDrawDateSql === null && !empty($lotteryConfig['next_draw_date'])) {
+                    $__cfgNdd = (string)$lotteryConfig['next_draw_date'];
+                    if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $__cfgNdd, $__nm)) {
+                        $nextDrawDateSql = $__nm[1];
+                    } else {
+                        $nextDrawDateSql = (new Date($__cfgNdd, $drawTz))->format('Y-m-d', true);
+                    }
+                    unset($__cfgNdd, $__nm);
                 }
-            } catch (\Throwable $__) { /* ignore */ }
+            } catch (\Throwable $e) { /* ignore; leave as NULL */ }
+
+            // 3) Final fallback: proven backward scan in draw table
+            if ($nextDrawDateSql === null && !empty($dbCol)) {
+                try {
+                    $fallbackNdd = getNextDrawDate($selectedGameId, $db, $dbCol);
+                    if (!empty($fallbackNdd)) {
+                        if (preg_match('/^(\d{4}-\d{2}-\d{2})/', (string)$fallbackNdd, $__nm)) {
+                            $nextDrawDateSql = $__nm[1];
+                        } else {
+                            $nextDrawDateSql = (new Date($fallbackNdd, $drawTz))->format('Y-m-d', true);
+                        }
+                        unset($__nm);
+                    }
+                } catch (\Throwable $__) { /* ignore */ }
+            }
         }
 
         if ($nextDrawDateSql !== null) {
@@ -16393,11 +16751,11 @@ $labelInput = implode(' - ', $parts);
         }
 
         try {
-            if (!empty($nda)) {
-                // Full timestamp for next_draw_at (DATETIME column)
-                $nextDrawAtSql = (new Date($nda, $siteTz))->toSql();
-            } elseif (!empty($lotteryConfig['next_draw_at'])) {
-                $nextDrawAtSql = (new Date($lotteryConfig['next_draw_at'], $siteTz))->toSql();
+            if (empty($skaiBatchTargetDraw['has_valid_target_draw_date']) && $nextDrawAtSql === null && !empty($nda)) {
+                // Full timestamp for next_draw_at (DATETIME column) - use lottery TZ
+                $nextDrawAtSql = (new Date($nda, $drawTz))->toSql();
+            } elseif (empty($skaiBatchTargetDraw['has_valid_target_draw_date']) && $nextDrawAtSql === null && !empty($lotteryConfig['next_draw_at'])) {
+                $nextDrawAtSql = (new Date($lotteryConfig['next_draw_at'], $drawTz))->toSql();
             }
         } catch (\Throwable $e) { /* ignore; leave as NULL */ }
 
@@ -16418,7 +16776,7 @@ $labelInput = implode(' - ', $parts);
             'draw_date'          => (string)($nextDrawDateSql ?? ''),
             'draw_at'            => $nextDrawAtSql,
             'draw_session'       => $drawSessionSql,
-            'timezone_id'        => $siteTz,
+            'timezone_id'        => $drawTz,
             'prediction_family'  => $isDailyGamePosted ? 'daily' : 'regular',
             'prediction_type'    => $__predType ?? ($isDailyGamePosted ? 'daily' : 'regular'),
             'pick_size'          => $isDailyGamePosted ? (int)((isset($__dailyPickSizeRow) && $__dailyPickSizeRow !== null) ? $__dailyPickSizeRow : 0) : (int)count($mainArr),
@@ -16458,24 +16816,102 @@ $source = 'skai_prediction';
 $skaiSourceBatchId       = (int) $in->getInt('source_batch_id', 0);
 $skaiSourceBatchRunId    = (int) $in->getInt('source_batch_run_id', 0);
 $skaiSourceBatchRunOrder = (int) $in->getInt('source_batch_run_order', 0);
+if ($skaiSourceBatchId <= 0 && !empty($skaiSourceBatchIdForTarget)) { $skaiSourceBatchId = (int)$skaiSourceBatchIdForTarget; }
+if ($skaiSourceBatchRunOrder <= 0 && !empty($skaiSourceBatchRunOrderForTarget)) { $skaiSourceBatchRunOrder = (int)$skaiSourceBatchRunOrderForTarget; }
 $skaiBatchControlFlag    = (int) $in->getInt('batch_control_flag', 0);
 $skaiSourceBatchType     = preg_replace('/[^a-zA-Z0-9 _\-]/', '', (string) $in->getString('source_batch_type', ''));
 $skaiSourceBatchOrigin   = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $in->getString('source_batch_origin', ''));
 $skaiBatchTestVariable   = preg_replace('/[^a-zA-Z0-9 _\-\.]/', '', (string) $in->getString('source_batch_test_variable', ''));
 $skaiBatchTestValue      = preg_replace('/[^a-zA-Z0-9 _\-\.%]/', '', (string) $in->getString('source_batch_test_value', ''));
+$skaiHasRealBatchIdentity = ($skaiSourceBatchId > 0 && $skaiSourceBatchRunOrder >= 1 && $skaiSourceBatchRunOrder <= 9);
+$skaiBatchOriginSource = ($skaiSourceBatchOrigin !== '') ? $skaiSourceBatchOrigin : 'mle_precision_lock_batch';
 $skaiBatchTracking = [];
-if ($skaiSourceBatchId > 0 || $skaiSourceBatchRunId > 0 || $skaiSourceBatchOrigin !== '') {
+if ($skaiHasRealBatchIdentity) {
     $skaiBatchTracking = [
-        'origin_source' => 'mle_precision_lock_batch',
+        'origin_source' => $skaiBatchOriginSource,
         'source_batch_id' => $skaiSourceBatchId,
         'source_batch_run_id' => $skaiSourceBatchRunId,
         'source_batch_type' => $skaiSourceBatchType !== '' ? $skaiSourceBatchType : 'SKAI Precision Lock Batch',
         'source_batch_run_order' => $skaiSourceBatchRunOrder,
-        'source_batch_origin' => $skaiSourceBatchOrigin !== '' ? $skaiSourceBatchOrigin : 'mle_precision_lock_batch',
+        'source_batch_origin' => $skaiBatchOriginSource,
         'batch_control_flag' => $skaiBatchControlFlag ? 1 : 0,
         'test_variable' => $skaiBatchTestVariable,
         'test_value' => $skaiBatchTestValue,
     ];
+}
+
+// [[SKAI_BATCH_IDENTITY_DEMOTION_GUARD_2026_06_03]]
+// Outside explicit batch-save mode, do not trust posted batch identity unless it
+// resolves to a valid header + run row with matching lottery context. Invalid
+// identity is demoted to a normal manual SKAI save so it cannot pollute tracked
+// batch evidence while still allowing the prediction save itself.
+if (!$skaiBatchSaveMode && $skaiHasRealBatchIdentity) {
+    $skaiBatchIdentityFail = '';
+    $skaiHeaderLotteryIdForDemotion = 0;
+    $skaiSavedLotteryIdForDemotion = (int)$lotteryId;
+    $skaiTargetLotteryIdForDemotion = (int)($predictionTarget['target_lottery_id'] ?? 0);
+    try {
+        $skaiMleHeaderRow = (
+            is_array($skaiCachedBatchHeaderRow)
+            && (int)($skaiCachedBatchHeaderRow['id'] ?? 0) === (int)$skaiSourceBatchId
+        ) ? $skaiCachedBatchHeaderRow : null;
+        if (!is_array($skaiMleHeaderRow) || empty($skaiMleHeaderRow)) {
+            $skaiMleHeaderQ = $db->getQuery(true)
+                ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
+                ->from($db->quoteName('#__mle_skai_batch_header'))
+                ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchId)
+                ->where($db->quoteName('user_id') . ' = ' . (int)$user->id)
+                ->setLimit(1);
+            $db->setQuery($skaiMleHeaderQ);
+            $skaiMleHeaderRow = $db->loadAssoc();
+        }
+        if (!is_array($skaiMleHeaderRow) || empty($skaiMleHeaderRow)) {
+            $skaiBatchIdentityFail = 'batch_context_missing';
+        } else {
+            $skaiHeaderLotteryIdForDemotion = (int)($skaiMleHeaderRow['lottery_id'] ?? 0);
+            if (
+                $skaiHeaderLotteryIdForDemotion <= 0
+                || ($skaiSavedLotteryIdForDemotion > 0 && $skaiSavedLotteryIdForDemotion !== $skaiHeaderLotteryIdForDemotion)
+                || ($skaiTargetLotteryIdForDemotion > 0 && $skaiTargetLotteryIdForDemotion !== $skaiHeaderLotteryIdForDemotion)
+            ) {
+                $skaiBatchIdentityFail = 'batch_lottery_mismatch';
+            } else {
+                $skaiMleRunIdForDemotion = (
+                    is_array($skaiCachedBatchRunRow)
+                    && (int)($skaiCachedBatchRunRow['batch_id'] ?? 0) === (int)$skaiSourceBatchId
+                    && (int)($skaiCachedBatchRunRow['run_order'] ?? 0) === (int)$skaiSourceBatchRunOrder
+                ) ? (int)($skaiCachedBatchRunRow['id'] ?? 0) : 0;
+                if ($skaiMleRunIdForDemotion <= 0) {
+                    $skaiMleRunQ = $db->getQuery(true)
+                        ->select($db->quoteName('id'))
+                        ->from($db->quoteName('#__mle_skai_batch_run'))
+                        ->where($db->quoteName('batch_id') . ' = ' . (int)$skaiSourceBatchId)
+                        ->where($db->quoteName('run_order') . ' = ' . (int)$skaiSourceBatchRunOrder)
+                        ->order($db->quoteName('id') . ' DESC')
+                        ->setLimit(1);
+                    $db->setQuery($skaiMleRunQ);
+                    $skaiMleRunIdForDemotion = (int)$db->loadResult();
+                }
+                if ($skaiMleRunIdForDemotion <= 0) {
+                    $skaiBatchIdentityFail = 'batch_run_missing';
+                }
+            }
+        }
+    } catch (\Throwable $__skaiBatchIdentityEx) {
+        $skaiBatchIdentityFail = 'batch_context_missing';
+    }
+    if ($skaiBatchIdentityFail !== '') {
+        skai_debug_log('[SKAI BATCH IDENTITY DEMOTED] reason=' . $skaiBatchIdentityFail . ' uid=' . (int)$user->id . ' batch_id=' . (int)$skaiSourceBatchId . ' run_order=' . (int)$skaiSourceBatchRunOrder . ' saved_lottery_id=' . (int)$skaiSavedLotteryIdForDemotion . ' target_lottery_id=' . (int)$skaiTargetLotteryIdForDemotion . ' header_lottery_id=' . (int)$skaiHeaderLotteryIdForDemotion);
+        $skaiHasRealBatchIdentity = false;
+        $skaiSourceBatchId = 0;
+        $skaiSourceBatchRunId = 0;
+        $skaiSourceBatchRunOrder = 0;
+        $skaiBatchControlFlag = 0;
+        $skaiSourceBatchType = '';
+        $skaiSourceBatchOrigin = '';
+        $skaiBatchOriginSource = 'skai';
+        $skaiBatchTracking = [];
+    }
 }
 
 // [[SKAI_V122_HIVE_LEARNING_CONTRACT]] Canonical learning envelope for every SKAI save.
@@ -16496,7 +16932,7 @@ $skaiHiveCommandSource = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string)$in->getS
 $skaiHiveIntakeMode = 'observed_manual_skai';
 if ($skaiHiveQueueId > 0 || $skaiHiveAssignmentId > 0 || $skaiHiveGuidedMode === 'required' || $skaiHiveCommandSource === 'mylottoexpert') {
     $skaiHiveIntakeMode = 'planned_hive_guided';
-} elseif ($skaiBatchSaveMode || $skaiBatchSaveTotal > 0 || !empty($skaiBatchTracking)) {
+} elseif ($skaiBatchSaveMode || $skaiBatchSaveTotal > 0 || $skaiHasRealBatchIdentity) {
     $skaiHiveIntakeMode = 'observed_skai_batch';
 }
 if ($skaiHiveResearchType === '') { $skaiHiveResearchType = ($skaiHiveIntakeMode === 'planned_hive_guided') ? 'guided_hive_research' : 'observed_skai_intake'; }
@@ -16525,7 +16961,7 @@ $skaiHiveContract = [
     'missing_fields' => $skaiHiveContractMissing,
     'hive_intake_mode' => $skaiHiveIntakeMode,
     'source' => 'skai_prediction',
-    'origin_source' => !empty($skaiBatchTracking) ? 'mle_precision_lock_batch' : 'skai',
+    'origin_source' => $skaiHasRealBatchIdentity ? $skaiBatchOriginSource : 'skai',
     'identity' => [
         'user_id' => (int)$user->id,
         'lottery_id' => (int)$lotteryId,
@@ -16766,6 +17202,84 @@ if (empty($__regularExtraDisplayArr) && !empty($extraArr)) { $__regularExtraDisp
 $__regularMainDisplayArr = array_values(array_slice(array_map('intval', is_array($__regularMainDisplayArr) ? $__regularMainDisplayArr : []), 0, 20));
 $__regularExtraDisplayArr = array_values(array_slice(array_map('intval', is_array($__regularExtraDisplayArr) ? $__regularExtraDisplayArr : []), 0, 5));
 
+// [[MLE_DRAW_TZ_FIX_2026]] Compute human-readable draw label with official lottery timezone abbreviation.
+// Mirrors mylottoexpertResolveOfficialDrawTarget() label logic so direct SKAI saves display the same format.
+$__skaiDrawLabel = '';
+$__skaiDrawLabelDate = (string)($predictionTarget['target_draw_date'] ?? $nextDrawDateSql ?? '');
+if (!empty($skaiBatchTargetDraw['target_draw_label'])) {
+    $__skaiDrawLabel = (string)$skaiBatchTargetDraw['target_draw_label'];
+} elseif ($__skaiDrawLabelDate !== '') {
+    try {
+        $__dtLabel = new \Joomla\CMS\Date\Date($__skaiDrawLabelDate . ' 00:00:00', $drawTz);
+        $__tzAbbrMap = array(
+            'America/New_York'    => 'ET',
+            'America/Chicago'     => 'CT',
+            'America/Denver'      => 'MT',
+            'America/Phoenix'     => 'MT',
+            'America/Los_Angeles' => 'PT',
+            'America/Anchorage'   => 'AKT',
+            'Pacific/Honolulu'    => 'HT',
+        );
+        $__tzDisplay = isset($__tzAbbrMap[$drawTz]) ? $__tzAbbrMap[$drawTz] : $drawTz;
+        $__skaiDrawLabel = 'Draw: ' . $__dtLabel->format('M j, Y', true) . ' ' . $__tzDisplay;
+    } catch (\Throwable $__) {
+        $__skaiDrawLabel = 'Draw: ' . $__skaiDrawLabelDate;
+    }
+}
+$__skaiDrawSource = !empty($skaiBatchTargetDraw['target_draw_source'])
+    ? (string)$skaiBatchTargetDraw['target_draw_source']
+    : 'lottery_timezone_resolver';
+$__skaiDrawResolutionNote = !empty($skaiBatchTargetDraw['target_draw_resolution_note'])
+    ? (string)$skaiBatchTargetDraw['target_draw_resolution_note']
+    : (isset($lotteryTz) && $lotteryTz !== '' ? 'resolved_from_lottery_config' : (isset($drawTz) ? 'resolved_from_draw_family_or_site_fallback' : 'unknown'));
+if (!empty($skaiBatchTargetDraw['has_valid_target_draw_date'])) {
+    $__skaiDrawSource = 'batch_json_preserved';
+    if (strpos($__skaiDrawResolutionNote, 'preserved_from_batch_full_settings_json') === false) {
+        $__skaiDrawResolutionNote = trim($__skaiDrawResolutionNote) !== ''
+            ? ($__skaiDrawResolutionNote . ' | preserved_from_batch_full_settings_json')
+            : 'preserved_from_batch_full_settings_json';
+    }
+}
+$__skaiTargetDrawDateRow = !empty($skaiBatchTargetDraw['has_valid_target_draw_date'])
+    ? (string)$skaiBatchTargetDraw['target_draw_date']
+    : ($predictionTarget['target_draw_date'] ?? null);
+$__skaiTargetDrawAtRow = !empty($skaiBatchTargetDraw['has_valid_target_draw_date'])
+    ? (!empty($skaiBatchTargetDraw['target_draw_at']) ? (string)$skaiBatchTargetDraw['target_draw_at'] : null)
+    : ($predictionTarget['target_draw_at'] ?? null);
+$__skaiTargetDrawTimezoneRow = !empty($skaiBatchTargetDraw['target_draw_timezone'])
+    ? (string)$skaiBatchTargetDraw['target_draw_timezone']
+    : (isset($drawTz) ? $drawTz : ($predictionTarget['target_timezone_id'] ?? null));
+
+// [[SKAI_BATCH_TARGET_FINAL_OVERRIDE_2026_06_02]]
+// Final guard immediately before row mapping: if batch full_settings_json carries a valid
+// target_draw_date, force canonical persisted target_draw_* fields from that batch payload.
+$__skaiFinalTargetDrawDateRow = $__skaiTargetDrawDateRow;
+$__skaiFinalTargetDrawAtRow = $__skaiTargetDrawAtRow;
+$__skaiFinalTargetDrawTimezoneRow = $__skaiTargetDrawTimezoneRow;
+$__skaiFinalDrawLabel = $__skaiDrawLabel;
+$__skaiFinalDrawSource = $__skaiDrawSource;
+$__skaiFinalDrawResolutionNote = $__skaiDrawResolutionNote;
+$__skaiBatchFinalDate = trim((string)($skaiBatchTargetDraw['target_draw_date'] ?? ''));
+if ($__skaiBatchFinalDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $__skaiBatchFinalDate) && strtotime($__skaiBatchFinalDate) !== false) {
+    $__skaiFinalTargetDrawDateRow = $__skaiBatchFinalDate;
+    $__skaiFinalTargetDrawAtRow = !empty($skaiBatchTargetDraw['target_draw_at']) ? (string)$skaiBatchTargetDraw['target_draw_at'] : null;
+    if (!empty($skaiBatchTargetDraw['target_draw_timezone'])) {
+        $__skaiFinalTargetDrawTimezoneRow = (string)$skaiBatchTargetDraw['target_draw_timezone'];
+    }
+    if (!empty($skaiBatchTargetDraw['target_draw_label'])) {
+        $__skaiFinalDrawLabel = (string)$skaiBatchTargetDraw['target_draw_label'];
+    }
+    $__skaiFinalDrawSource = 'batch_json_preserved';
+    $__skaiBatchBaseResolutionNote = trim((string)($skaiBatchTargetDraw['target_draw_resolution_note'] ?? $__skaiFinalDrawResolutionNote));
+    if (strpos($__skaiBatchBaseResolutionNote, 'preserved_from_batch_full_settings_json') === false) {
+        $__skaiBatchBaseResolutionNote = $__skaiBatchBaseResolutionNote !== ''
+            ? ($__skaiBatchBaseResolutionNote . ' | preserved_from_batch_full_settings_json')
+            : 'preserved_from_batch_full_settings_json';
+    }
+    $__skaiFinalDrawResolutionNote = $__skaiBatchBaseResolutionNote;
+}
+unset($__skaiBatchFinalDate, $__skaiBatchBaseResolutionNote);
+
 $row = (object) [
     'user_id'             => (int) $user->id,
     'lottery_id'          => (int) $lotteryId,
@@ -16781,16 +17295,24 @@ $row = (object) [
     // on sites where save_intent exists and is used to separate prediction archives
     // from manual play sets.
     'save_intent'         => 'prediction_archive',
+    'play_status'         => 'draft',
+    'evaluation_status'   => 'pending',
     'label'               => (string) $label,
     'prediction_target_id' => ($predictionTargetId !== '' ? $predictionTargetId : null),
     'prediction_target_key' => ($predictionTargetKey !== '' ? $predictionTargetKey : null),
     'prediction_target_json' => ($predictionTargetJson !== '' ? $predictionTargetJson : null),
     'target_game_id'      => ($predictionTarget['target_game_id'] ?? null),
     'target_lottery_id'   => ($predictionTarget['target_lottery_id'] ?? null),
-    'target_draw_date'    => ($predictionTarget['target_draw_date'] ?? null),
-    'target_draw_at'      => ($predictionTarget['target_draw_at'] ?? null),
+    'target_draw_date'    => $__skaiFinalTargetDrawDateRow,
+    'target_draw_at'      => $__skaiFinalTargetDrawAtRow,
     'target_draw_session' => ($predictionTarget['target_draw_session'] ?? null),
     'target_timezone_id'  => ($predictionTarget['target_timezone_id'] ?? null),
+    // [[MLE_DRAW_TZ_FIX_2026]] Traceability fields - written to row when columns exist
+    'target_draw_timezone'        => $__skaiFinalTargetDrawTimezoneRow,
+    'target_draw_at_tz'           => !empty($skaiBatchTargetDraw['target_draw_at_tz']) ? (string)$skaiBatchTargetDraw['target_draw_at_tz'] : null,
+    'target_draw_label'           => ($__skaiFinalDrawLabel !== '' ? $__skaiFinalDrawLabel : null),
+    'target_draw_source'          => ($__skaiFinalDrawSource !== '' ? $__skaiFinalDrawSource : null),
+    'target_draw_resolution_note' => ($__skaiFinalDrawResolutionNote !== '' ? $__skaiFinalDrawResolutionNote : null),
     'target_prediction_family' => ($predictionTarget['target_prediction_family'] ?? null),
     'target_prediction_type' => ($predictionTarget['target_prediction_type'] ?? null),
     'target_pick_size'    => ($predictionTarget['target_pick_size'] ?? null),
@@ -16809,7 +17331,7 @@ $row = (object) [
     'analysis_source_page'    => 'skai',
     'analysis_schema_version' => '1',
 
-    'origin_source'          => !empty($skaiBatchTracking) ? 'mle_precision_lock_batch' : 'skai',
+    'origin_source'          => $skaiHasRealBatchIdentity ? $skaiBatchOriginSource : 'skai',
     // [[SKAI_V122_HIVE_LEARNING_CONTRACT]] Persist contract fields when additive columns exist.
     'hive_learning_contract_version' => 'v122',
     'hive_intake_mode'               => $skaiHiveIntakeMode,
@@ -16821,14 +17343,14 @@ $row = (object) [
     'hive_contract_status'           => $skaiHiveContractStatus,
     'hive_contract_json'             => $skaiHiveContractJson,
     'hive_contract_missing_json'     => $skaiHiveContractMissingJson,
-    'source_batch_id'        => ($skaiSourceBatchId > 0 ? $skaiSourceBatchId : null),
-    'source_batch_run_id'    => ($skaiSourceBatchRunId > 0 ? $skaiSourceBatchRunId : null),
-    'source_batch_type'      => ($skaiSourceBatchType !== '' ? $skaiSourceBatchType : (!empty($skaiBatchTracking) ? 'SKAI Precision Lock Batch' : null)),
-    'source_batch_run_order' => ($skaiSourceBatchRunOrder > 0 ? $skaiSourceBatchRunOrder : null),
-    'source_batch_origin'    => ($skaiSourceBatchOrigin !== '' ? $skaiSourceBatchOrigin : (!empty($skaiBatchTracking) ? 'mle_precision_lock_batch' : null)),
-    'batch_control_flag'     => ($skaiBatchControlFlag ? 1 : 0),
-    'source_batch_test_variable' => ($skaiBatchTestVariable !== '' ? $skaiBatchTestVariable : null),
-    'source_batch_test_value'    => ($skaiBatchTestValue !== '' ? $skaiBatchTestValue : null),
+    'source_batch_id'        => ($skaiHasRealBatchIdentity ? $skaiSourceBatchId : null),
+    'source_batch_run_id'    => ($skaiHasRealBatchIdentity && $skaiSourceBatchRunId > 0 ? $skaiSourceBatchRunId : null),
+    'source_batch_type'      => ($skaiHasRealBatchIdentity ? ($skaiSourceBatchType !== '' ? $skaiSourceBatchType : 'SKAI Precision Lock Batch') : null),
+    'source_batch_run_order' => ($skaiHasRealBatchIdentity ? $skaiSourceBatchRunOrder : null),
+    'source_batch_origin'    => ($skaiHasRealBatchIdentity ? $skaiBatchOriginSource : null),
+    'batch_control_flag'     => ($skaiHasRealBatchIdentity && $skaiBatchControlFlag ? 1 : 0),
+    'source_batch_test_variable' => ($skaiHasRealBatchIdentity && $skaiBatchTestVariable !== '' ? $skaiBatchTestVariable : null),
+    'source_batch_test_value'    => ($skaiHasRealBatchIdentity && $skaiBatchTestValue !== '' ? $skaiBatchTestValue : null),
 
     'top_combos_json'     => $evidenceJson, // may be NULL if malformed earlier
     'date_saved'          => $nowSql,
@@ -16939,6 +17461,66 @@ $row = (object) [
         : (count($mainArr) . ' main' . (!empty($extraArr) ? ' + ' . count($extraArr) . ' bonus' : '')),
 ];
 
+        // [[SKAI_MLE_BATCH_SAVE_STRICT_VALIDATION]]
+        // In MyLottoExpert batch mode, block loose rows unless the posted batch context
+        // resolves to a real batch header + run row with matching lottery context.
+        if ($skaiBatchSaveMode) {
+            $skaiBatchValidationFail = '';
+            $skaiHeaderLotteryId = 0;
+            $skaiSavedLotteryId = (int)($row->lottery_id ?? 0);
+            $skaiTargetLotteryId = (int)($predictionTarget['target_lottery_id'] ?? 0);
+            if ($skaiSourceBatchId <= 0 || $skaiSourceBatchRunOrder < 1 || $skaiSourceBatchRunOrder > 9) {
+                $skaiBatchValidationFail = 'batch_context_missing';
+            } else {
+                try {
+                    $skaiMleHeaderQ = $db->getQuery(true)
+                        ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
+                        ->from($db->quoteName('#__mle_skai_batch_header'))
+                        ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchId)
+                        ->where($db->quoteName('user_id') . ' = ' . (int)$user->id)
+                        ->setLimit(1);
+                    $db->setQuery($skaiMleHeaderQ);
+                    $skaiMleHeaderRow = $db->loadAssoc();
+                    if (!is_array($skaiMleHeaderRow) || empty($skaiMleHeaderRow)) {
+                        $skaiBatchValidationFail = 'batch_context_missing';
+                    } else {
+                        $skaiHeaderLotteryId = (int)($skaiMleHeaderRow['lottery_id'] ?? 0);
+                        if (
+                            $skaiHeaderLotteryId <= 0
+                            || ($skaiSavedLotteryId > 0 && $skaiSavedLotteryId !== $skaiHeaderLotteryId)
+                            || ($skaiTargetLotteryId > 0 && $skaiTargetLotteryId !== $skaiHeaderLotteryId)
+                        ) {
+                            $skaiBatchValidationFail = 'batch_lottery_mismatch';
+                        } else {
+                            $skaiMleRunQ = $db->getQuery(true)
+                                ->select($db->quoteName('id'))
+                                ->from($db->quoteName('#__mle_skai_batch_run'))
+                                ->where($db->quoteName('batch_id') . ' = ' . (int)$skaiSourceBatchId)
+                                ->where($db->quoteName('run_order') . ' = ' . (int)$skaiSourceBatchRunOrder)
+                                ->order($db->quoteName('id') . ' DESC')
+                                ->setLimit(1);
+                            $db->setQuery($skaiMleRunQ);
+                            $skaiMleRunId = (int)$db->loadResult();
+                            if ($skaiMleRunId <= 0) {
+                                $skaiBatchValidationFail = 'batch_run_missing';
+                            }
+                        }
+                    }
+                } catch (\Throwable $__skaiMleBatchValidationEx) {
+                    $skaiBatchValidationFail = 'batch_context_missing';
+                }
+            }
+            if ($skaiBatchValidationFail !== '') {
+                skai_debug_log('[SKAI BATCH SAVE BLOCKED] reason=' . $skaiBatchValidationFail . ' uid=' . (int)$user->id . ' batch_id=' . (int)$skaiSourceBatchId . ' run_order=' . (int)$skaiSourceBatchRunOrder . ' saved_lottery_id=' . (int)$skaiSavedLotteryId . ' target_lottery_id=' . (int)$skaiTargetLotteryId . ' header_lottery_id=' . (int)$skaiHeaderLotteryId);
+                $skaiRespondBatchJson(false, [
+                    'reason' => (string)$skaiBatchValidationFail,
+                    'batch_index' => (int)$skaiBatchSaveIndex,
+                    'batch_total' => (int)$skaiBatchSaveTotal,
+                    'batch_label' => (string)$skaiBatchSaveLabel
+                ]);
+            }
+        }
+
         // Normalize: convert empty strings to NULL to avoid '' in nullable columns
         foreach ($row as $k => $v) {
             if ($v === '') { $row->$k = null; }
@@ -16998,6 +17580,43 @@ $row = (object) [
             }
             if (!isset($data['lottery_id'])) {
                 $data['lottery_id'] = (int)($row->lottery_id ?? 0);
+            }
+
+            // [[SKAI_MLE_BATCH_SAVE_DUPLICATE_GUARD_2026_06_03]]
+            // Browser retries / interrupted responses can replay the same batch save payload.
+            // Prevent duplicate inserts by reusing an existing row identity in batch mode.
+            if ($skaiBatchSaveMode) {
+                $skaiDupUserId = (int)($data['user_id'] ?? $user->id);
+                $skaiDupBatchId = (int)($data['source_batch_id'] ?? 0);
+                $skaiDupRunOrder = (int)($data['source_batch_run_order'] ?? 0);
+                if ($skaiDupUserId > 0 && $skaiDupBatchId > 0 && $skaiDupRunOrder > 0) {
+                    try {
+                        $skaiDupQ = $db->getQuery(true)
+                            ->select($db->quoteName('id'))
+                            ->from($db->quoteName('#__user_saved_numbers'))
+                            ->where($db->quoteName('user_id') . ' = ' . (int)$skaiDupUserId)
+                            ->where($db->quoteName('source_batch_id') . ' = ' . (int)$skaiDupBatchId)
+                            ->where($db->quoteName('source_batch_run_order') . ' = ' . (int)$skaiDupRunOrder)
+                            ->order($db->quoteName('id') . ' DESC')
+                            ->setLimit(1);
+                        $db->setQuery($skaiDupQ);
+                        $skaiDupSavedRowId = (int)$db->loadResult();
+                        if ($skaiDupSavedRowId > 0) {
+                            skai_debug_log('[SKAI BATCH SAVE DUPLICATE] user_id=' . (int)$skaiDupUserId . ' batch_id=' . (int)$skaiDupBatchId . ' run_order=' . (int)$skaiDupRunOrder . ' existing_row_id=' . (int)$skaiDupSavedRowId);
+                            $skaiRespondBatchJson(true, [
+                                'row_id' => (int)$skaiDupSavedRowId,
+                                'duplicate_guard' => 1,
+                                'reason' => 'duplicate_batch_run',
+                                'message' => 'Batch run already saved; existing row returned.',
+                                'batch_index' => (int)$skaiBatchSaveIndex,
+                                'batch_total' => (int)$skaiBatchSaveTotal,
+                                'batch_label' => (string)$skaiBatchSaveLabel
+                            ]);
+                        }
+                    } catch (\Throwable $__skaiBatchDupEx) {
+                        skai_debug_log('[SKAI BATCH SAVE DUPLICATE CHECK] non-fatal error: ' . $__skaiBatchDupEx->getMessage());
+                    }
+                }
             }
 
             // Normalize JSON-capable fields (encode arrays/objects)
@@ -17148,6 +17767,12 @@ $row = (object) [
                     'batch_label' => $skaiBatchSaveLabel
                 ]);
             }
+            if (!empty($skaiIsXhrSaveRequest) && !empty($skaiRespondSaveJson) && is_callable($skaiRespondSaveJson)) {
+                $skaiRespondSaveJson(false, [
+                    'reason' => 'transaction_catch',
+                    'message' => 'Save failed. Please try again.'
+                ]);
+            }
             if (!$skaiIsXhrSaveRequest) {
                 if (!empty($isDebug)) {
                     $app->enqueueMessage('Save failed (rolled back). Please try again.', 'error');
@@ -17193,6 +17818,13 @@ $row = (object) [
                 error_log('[SKAI V5] saved row id fallback lookup failed: ' . $__skaiSavedIdLookupEx->getMessage());
             }
         }
+        try {
+            $skaiUnhideLotteryId = (int)$lotteryId;
+            if ($skaiUnhideLotteryId <= 0) { $skaiUnhideLotteryId = (int)($row->lottery_id ?? 0); }
+            if ($skaiUnhideLotteryId > 0) {
+                mylottoexpertUnhideLotteryForUser($db, (int)$user->id, $skaiUnhideLotteryId);
+            }
+        } catch (\Throwable $__skaiUnhideEx) { }
         skai_debug_log('[SKAI SAVE SUCCESS] row_id=' . (int)$newId . ' uid=' . (int)$user->id . ' lotId=' . (int)$lotteryId . ' source=' . (string)$source . ' main_count=' . count($mainArr) . ' extra_count=' . count($extraArr));
         $__skaiAutoHiveResult = array('ok'=>false,'reason'=>'not_run');
         if (function_exists('SKAI_MLE_AUTO_HIVE_afterSave')) {
@@ -17354,6 +17986,8 @@ $row = (object) [
         if ($skaiBatchSaveMode) {
             skai_debug_log('[SKAI BATCH SAVE SUCCESS] idx=' . $skaiBatchSaveIndex . ' total=' . $skaiBatchSaveTotal . ' label=' . $skaiBatchSaveLabel . ' row_id=' . (int) $newId);
             $skaiRespondBatchJson(true, [
+                'reason' => 'saved',
+                'message' => 'Saved to your dashboard.',
                 'row_id' => (int) $newId,
                 'hive_contract_status' => (string)($skaiHiveContractStatus ?? ''),
                 'hive_intake_mode' => (string)($skaiHiveIntakeMode ?? ''),
@@ -17381,7 +18015,7 @@ $row = (object) [
                 header('Content-Type: application/json; charset=utf-8');
                 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
             }
-            echo json_encode(['ok' => true, 'row_id' => (int)$newId, 'hive_contract_status' => (string)($skaiHiveContractStatus ?? ''), 'hive_intake_mode' => (string)($skaiHiveIntakeMode ?? ''), 'auto_hive_intake' => !empty($__skaiAutoHiveResult['ok']) ? 1 : 0, 'auto_hive_queue_id' => (int)($__skaiAutoHiveResult['queue_id'] ?? 0), 'auto_hive_assignment_id' => (int)($__skaiAutoHiveResult['assignment_id'] ?? 0), 'auto_hive_settings_fingerprint' => (string)($__skaiAutoHiveResult['settings_fingerprint'] ?? '')], JSON_UNESCAPED_SLASHES);
+            echo json_encode(['ok' => true, 'reason' => 'saved', 'message' => 'Saved to your dashboard.', 'row_id' => (int)$newId, 'hive_contract_status' => (string)($skaiHiveContractStatus ?? ''), 'hive_intake_mode' => (string)($skaiHiveIntakeMode ?? ''), 'auto_hive_intake' => !empty($__skaiAutoHiveResult['ok']) ? 1 : 0, 'auto_hive_queue_id' => (int)($__skaiAutoHiveResult['queue_id'] ?? 0), 'auto_hive_assignment_id' => (int)($__skaiAutoHiveResult['assignment_id'] ?? 0), 'auto_hive_settings_fingerprint' => (string)($__skaiAutoHiveResult['settings_fingerprint'] ?? '')], JSON_UNESCAPED_SLASHES);
             exit(0);
         }
 
@@ -17443,6 +18077,7 @@ $row = (object) [
         }
     }
 } catch (\Throwable $e) {
+    skai_safe_save_error_log('[SKAI SAVE FATAL] ' . $e->getMessage());
     if (!empty($skaiBatchSaveMode) && !empty($skaiRespondBatchJson) && is_callable($skaiRespondBatchJson)) {
         skai_debug_log('[SKAI BATCH SAVE FATAL] idx=' . (int) $skaiBatchSaveIndex . ' total=' . (int) $skaiBatchSaveTotal);
         $skaiRespondBatchJson(false, [
@@ -17451,6 +18086,12 @@ $row = (object) [
             'batch_index' => (int) $skaiBatchSaveIndex,
             'batch_total' => (int) $skaiBatchSaveTotal,
             'batch_label' => (string) $skaiBatchSaveLabel
+        ]);
+    }
+    if (!empty($skaiIsXhrSaveRequest) && !empty($skaiRespondSaveJson) && is_callable($skaiRespondSaveJson)) {
+        $skaiRespondSaveJson(false, [
+            'reason' => 'save_fatal',
+            'message' => 'An unexpected error occurred. Please try again.'
         ]);
     }
     // [FIX-BATCH] Raw-$_POST fallback: if $skaiBatchSaveMode / $skaiRespondBatchJson were not
@@ -27727,15 +28368,12 @@ if (!isset($skaiStatusShouldRender)) {
                  value="<?php echo htmlspecialchars($nextDrawDateSafe, ENT_QUOTES, 'UTF-8'); ?>" />
 
           <?php
-          // NEW: Provide next_draw_at when we have a time component.
-          // If $nextDrawDate is date-only, handler will fall back safely.
+          // Provide next_draw_at using the date-only portion to avoid server-timezone
+          // interpretation rolling over the draw date (e.g. 11 PM ET = next-day UTC).
+          // The save handler extracts the date via regex, so sending a bare date is safe.
           $nextDrawAtSafe = '';
-          if (!empty($nextDrawDate)) {
-              $ts = strtotime((string) $nextDrawDate);
-              if ($ts) {
-                  // ISO-like local timestamp string; matches handler expectations
-                  $nextDrawAtSafe = date('Y-m-d H:i:s', $ts);
-              }
+          if (!empty($nextDrawDateSafe)) {
+              $nextDrawAtSafe = $nextDrawDateSafe . ' 00:00:00';
           }
           ?>
           <input type="hidden"
@@ -59258,6 +59896,46 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     return '';
   }
+  function skaiMleGetQueryIntFromUrl(urlLike, key) {
+    var out = 0;
+    try {
+      if (!urlLike || !key) { return 0; }
+      var qs = String(urlLike).split('?')[1] || '';
+      if (!qs) { return 0; }
+      var hashPos = qs.indexOf('#');
+      if (hashPos >= 0) { qs = qs.substring(0, hashPos); }
+      var params = new URLSearchParams(qs);
+      out = parseInt(params.get(key) || '0', 10) || 0;
+    } catch (_) { out = 0; }
+    return out > 0 ? out : 0;
+  }
+  function skaiMleResolveBatchId(preferredId) {
+    var id = parseInt(preferredId || 0, 10) || 0;
+    if (id > 0) { return id; }
+    try {
+      id = parseInt((window.MLE_PRECISION_BATCH_CONTEXT && window.MLE_PRECISION_BATCH_CONTEXT.batch_id) || 0, 10) || 0;
+      if (id > 0) { return id; }
+    } catch (_) {}
+    try {
+      id = parseInt((window.SKAI_MLE_SERVER_BATCH_PAYLOAD && window.SKAI_MLE_SERVER_BATCH_PAYLOAD.batch_id) || 0, 10) || 0;
+      if (id > 0) { return id; }
+    } catch (_) {}
+    try {
+      id = parseInt((window.SKAI_MLE_SERVER_BATCH_STATUS && window.SKAI_MLE_SERVER_BATCH_STATUS.batch_id) || 0, 10) || 0;
+      if (id > 0) { return id; }
+    } catch (_) {}
+    id = parseInt(skaiMleGetUrlParam('batch_id') || '0', 10) || 0;
+    if (id > 0) { return id; }
+    try {
+      var saveForm = document.getElementById('skai-save-form') || document.getElementById('skai-ai-save-form');
+      if (saveForm) {
+        var formAction = String(saveForm.getAttribute('action') || '');
+        id = skaiMleGetQueryIntFromUrl(formAction, 'batch_id');
+        if (id > 0) { return id; }
+      }
+    } catch (_) {}
+    return 0;
+  }
   function skaiMleGuidedRequired() {
     return skaiMleGetUrlParam('mle_skai_batch') === '1'
       && (skaiMleGetUrlParam('mle_guided_mode') === 'required' || skaiMleGetUrlParam('mle_required_action') === 'precision_batch');
@@ -59490,8 +60168,8 @@ document.addEventListener('DOMContentLoaded', function () {
   function loadMlePrecisionBatchCombos() {
     try {
       if (window.location.search.indexOf('mle_skai_batch=1') === -1) { return null; }
-      var urlBatchId = 0;
-      try { urlBatchId = parseInt(new URLSearchParams(window.location.search).get('batch_id') || '0', 10) || 0; } catch (_) { urlBatchId = 0; }
+      var urlBatchId = skaiMleResolveBatchId(0);
+      if (urlBatchId <= 0) { return null; }
       var raw = sessionStorage.getItem('mle_precision_lock_batch_payload_v1') || localStorage.getItem('mle_precision_lock_batch_payload_v1') || '';
       var storagePayload = null;
       if (raw) {
@@ -59503,7 +60181,19 @@ document.addEventListener('DOMContentLoaded', function () {
         payload = serverPayload;
       } else if (storagePayload && storagePayload.runs && storagePayload.runs.length === 9) {
         var storageBatchId = parseInt(storagePayload.batch_id || 0, 10) || 0;
-        if (!urlBatchId || !storageBatchId || storageBatchId === urlBatchId) {
+        var storageLotteryId = parseInt(storagePayload.lottery_id || 0, 10) || 0;
+        var storageGameId = String(storagePayload.game_id || '').toLowerCase();
+        var urlLotteryId = 0;
+        var urlGameId = '';
+        try { urlLotteryId = parseInt(skaiMleGetUrlParam('lottery_id') || '0', 10) || 0; } catch (_) {}
+        try { urlGameId = String(skaiMleGetUrlParam('game_id') || skaiMleGetUrlParam('gameId') || '').toLowerCase(); } catch (_) {}
+        // [[MLE_STORAGE_LOTTERY_GUARD]] Reject stale storage payload when the lottery or
+        // game context does not match the current page. This prevents a payload that was
+        // stored for one lottery (e.g. Washington Hit 5, batch_id=59) from being applied
+        // to a SKAI session for a different lottery (e.g. Florida Fantasy 5).
+        var lotteryOk = !(urlLotteryId > 0 && storageLotteryId > 0 && storageLotteryId !== urlLotteryId);
+        var gameOk = !(urlGameId !== '' && storageGameId !== '' && storageGameId !== urlGameId);
+        if (lotteryOk && gameOk && (!urlBatchId || !storageBatchId || storageBatchId === urlBatchId)) {
           payload = storagePayload;
         } else {
           try {
@@ -59722,7 +60412,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function skaiMleShowMissingPayloadWarning() {
     try {
-      if (window.location.search.indexOf('mle_skai_batch=1') === -1) { return; }
+      var status = window.SKAI_MLE_SERVER_BATCH_STATUS || {};
+      var hasGuidedRequest = window.location.search.indexOf('mle_skai_batch=1') !== -1 || window.location.search.indexOf('mle_guided_mode=required') !== -1 || !!status.requested;
+      if (!hasGuidedRequest) { return; }
       var banner = document.getElementById('skai-mle-batch-context-banner');
       var bannerText = document.getElementById('skai-mle-batch-context-text');
       if (!banner || !bannerText) { return; }
@@ -59730,10 +60422,10 @@ document.addEventListener('DOMContentLoaded', function () {
       banner.style.background = '#fffbeb';
       banner.style.borderColor = '#fde68a';
       banner.style.color = '#92400e';
-      var status = window.SKAI_MLE_SERVER_BATCH_STATUS || {};
       var reason = status.reason ? String(status.reason) : 'unknown';
       var rows = (typeof status.row_count !== 'undefined') ? String(status.row_count) : '0';
-      bannerText.innerHTML = '<strong>Batch link detected, but the 9 saved MyLottoExpert runs were not loaded.</strong> SKAI looked for this batch and found ' + rows + ' runnable row(s). Reason: ' + skaiMleEsc(reason) + '. Go back to MyLottoExpert and open the batch again, create a fresh batch, or cancel guided mode if you intentionally want a single manual SKAI run.';
+      var warningMessage = status.warning_message ? String(status.warning_message) : '';
+      bannerText.innerHTML = '<strong>Batch link detected, but the requested guided MyLottoExpert batch was not loaded.</strong> SKAI looked for this batch and found ' + rows + ' runnable row(s). Reason: ' + skaiMleEsc(reason) + '. ' + (warningMessage ? skaiMleEsc(warningMessage) + ' ' : '') + 'Go back to MyLottoExpert and open a fresh tracked batch.';
       var guidedActions = document.getElementById('skai-mle-guided-actions');
       if (guidedActions && skaiMleGuidedRequired() && !skaiMleGuidedCancelled()) { guidedActions.style.display = 'flex'; }
     } catch (_) {}
@@ -61318,16 +62010,21 @@ document.addEventListener('DOMContentLoaded', function () {
     if (_bfUrlParam('mle_guided_mode') !== '') { _payload['mle_guided_mode'] = _bfUrlParam('mle_guided_mode'); }
     if (_bfUrlParam('mle_command_source') !== '') { _payload['mle_command_source'] = _bfUrlParam('mle_command_source'); }
 
-    if (r.combo && r.combo.mlePrecisionLock && r.combo.mleBatch) {
+    var _mleBatch = (r.combo && r.combo.mleBatch) ? r.combo.mleBatch : null;
+    var _ctxBatchId = (window.MLE_PRECISION_BATCH_CONTEXT && window.MLE_PRECISION_BATCH_CONTEXT.batch_id) ? window.MLE_PRECISION_BATCH_CONTEXT.batch_id : '';
+    var _batchIdResolved = skaiMleResolveBatchId((_mleBatch && _mleBatch.batch_id) || _ctxBatchId || 0);
+    var _batchOrderResolved = parseInt((_mleBatch && _mleBatch.batch_run_order) || _payload['batch_save_index'] || (idx + 1), 10) || (idx + 1);
+    if (_batchIdResolved > 0 || (r.combo && r.combo.mlePrecisionLock)) {
       _payload['origin_source'] = 'mle_precision_lock_batch';
-      _payload['source_batch_id'] = String(r.combo.mleBatch.batch_id || '');
-      _payload['source_batch_run_id'] = String(r.combo.mleBatch.batch_run_id || '');
-      _payload['source_batch_type'] = String(r.combo.mleBatch.batch_type || 'SKAI Precision Lock Batch');
-      _payload['source_batch_run_order'] = String(r.combo.mleBatch.batch_run_order || (idx + 1));
+      if (_batchIdResolved > 0) { _payload['source_batch_id'] = String(_batchIdResolved); }
+      if (_batchIdResolved > 0) { _payload['batch_id'] = String(_batchIdResolved); }
+      if (_mleBatch && _mleBatch.batch_run_id) { _payload['source_batch_run_id'] = String(_mleBatch.batch_run_id); }
+      _payload['source_batch_type'] = String((_mleBatch && _mleBatch.batch_type) || 'SKAI Precision Lock Batch');
+      _payload['source_batch_run_order'] = String(_batchOrderResolved);
       _payload['source_batch_origin'] = 'mle_precision_lock_batch';
-      _payload['batch_control_flag'] = r.combo.mleBatch.is_control ? '1' : '0';
-      _payload['source_batch_test_variable'] = String(r.combo.mleBatch.test_variable || '');
-      _payload['source_batch_test_value'] = String(r.combo.mleBatch.test_value || '');
+      _payload['batch_control_flag'] = (_mleBatch && _mleBatch.is_control) ? '1' : '0';
+      _payload['source_batch_test_variable'] = String((_mleBatch && _mleBatch.test_variable) || '');
+      _payload['source_batch_test_value'] = String((_mleBatch && _mleBatch.test_value) || '');
     }
 
     // 5. Serialize payload to POST body
@@ -61371,6 +62068,16 @@ document.addEventListener('DOMContentLoaded', function () {
         if (doneCallback) { doneCallback({ ok: false, failedIndex: idx, detail: _detail }); }
       }
     };
+    if (skaiMleGuidedRequired() && !skaiMleGuidedCancelled() && _batchIdResolved <= 0) {
+      _onSaveComplete({
+        ok: false,
+        batch_save_mode: true,
+        batch_index: idx + 1,
+        reason: 'batch_context_missing',
+        message: 'Guided batch link is missing batch_id. Reopen SKAI from MyLottoExpert so this run can save with tracked batch context.'
+      });
+      return;
+    }
     _saveTimeout = setTimeout(function () {
       _onSaveComplete({ ok: false, batch_save_mode: true, batch_index: idx + 1, reason: 'save_timeout', message: 'No save confirmation received within 180 seconds.' });
     }, 180000);
