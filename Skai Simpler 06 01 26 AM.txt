@@ -16776,15 +16776,17 @@ $skaiSourceBatchType     = preg_replace('/[^a-zA-Z0-9 _\-]/', '', (string) $in->
 $skaiSourceBatchOrigin   = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $in->getString('source_batch_origin', ''));
 $skaiBatchTestVariable   = preg_replace('/[^a-zA-Z0-9 _\-\.]/', '', (string) $in->getString('source_batch_test_variable', ''));
 $skaiBatchTestValue      = preg_replace('/[^a-zA-Z0-9 _\-\.%]/', '', (string) $in->getString('source_batch_test_value', ''));
+$skaiHasRealBatchIdentity = ($skaiSourceBatchId > 0 && $skaiSourceBatchRunOrder >= 1 && $skaiSourceBatchRunOrder <= 9);
+$skaiBatchOriginSource = ($skaiSourceBatchOrigin !== '') ? $skaiSourceBatchOrigin : 'mle_precision_lock_batch';
 $skaiBatchTracking = [];
-if ($skaiSourceBatchId > 0 || $skaiSourceBatchRunId > 0 || $skaiSourceBatchOrigin !== '') {
+if ($skaiHasRealBatchIdentity) {
     $skaiBatchTracking = [
-        'origin_source' => 'mle_precision_lock_batch',
+        'origin_source' => $skaiBatchOriginSource,
         'source_batch_id' => $skaiSourceBatchId,
         'source_batch_run_id' => $skaiSourceBatchRunId,
         'source_batch_type' => $skaiSourceBatchType !== '' ? $skaiSourceBatchType : 'SKAI Precision Lock Batch',
         'source_batch_run_order' => $skaiSourceBatchRunOrder,
-        'source_batch_origin' => $skaiSourceBatchOrigin !== '' ? $skaiSourceBatchOrigin : 'mle_precision_lock_batch',
+        'source_batch_origin' => $skaiBatchOriginSource,
         'batch_control_flag' => $skaiBatchControlFlag ? 1 : 0,
         'test_variable' => $skaiBatchTestVariable,
         'test_value' => $skaiBatchTestValue,
@@ -16809,7 +16811,7 @@ $skaiHiveCommandSource = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string)$in->getS
 $skaiHiveIntakeMode = 'observed_manual_skai';
 if ($skaiHiveQueueId > 0 || $skaiHiveAssignmentId > 0 || $skaiHiveGuidedMode === 'required' || $skaiHiveCommandSource === 'mylottoexpert') {
     $skaiHiveIntakeMode = 'planned_hive_guided';
-} elseif ($skaiBatchSaveMode || $skaiBatchSaveTotal > 0 || !empty($skaiBatchTracking)) {
+} elseif ($skaiBatchSaveMode || $skaiBatchSaveTotal > 0 || $skaiHasRealBatchIdentity) {
     $skaiHiveIntakeMode = 'observed_skai_batch';
 }
 if ($skaiHiveResearchType === '') { $skaiHiveResearchType = ($skaiHiveIntakeMode === 'planned_hive_guided') ? 'guided_hive_research' : 'observed_skai_intake'; }
@@ -16838,7 +16840,7 @@ $skaiHiveContract = [
     'missing_fields' => $skaiHiveContractMissing,
     'hive_intake_mode' => $skaiHiveIntakeMode,
     'source' => 'skai_prediction',
-    'origin_source' => !empty($skaiBatchTracking) ? 'mle_precision_lock_batch' : 'skai',
+    'origin_source' => $skaiHasRealBatchIdentity ? $skaiBatchOriginSource : 'skai',
     'identity' => [
         'user_id' => (int)$user->id,
         'lottery_id' => (int)$lotteryId,
@@ -17208,7 +17210,7 @@ $row = (object) [
     'analysis_source_page'    => 'skai',
     'analysis_schema_version' => '1',
 
-    'origin_source'          => !empty($skaiBatchTracking) ? 'mle_precision_lock_batch' : 'skai',
+    'origin_source'          => $skaiHasRealBatchIdentity ? $skaiBatchOriginSource : 'skai',
     // [[SKAI_V122_HIVE_LEARNING_CONTRACT]] Persist contract fields when additive columns exist.
     'hive_learning_contract_version' => 'v122',
     'hive_intake_mode'               => $skaiHiveIntakeMode,
@@ -17220,14 +17222,14 @@ $row = (object) [
     'hive_contract_status'           => $skaiHiveContractStatus,
     'hive_contract_json'             => $skaiHiveContractJson,
     'hive_contract_missing_json'     => $skaiHiveContractMissingJson,
-    'source_batch_id'        => ($skaiSourceBatchId > 0 ? $skaiSourceBatchId : null),
-    'source_batch_run_id'    => ($skaiSourceBatchRunId > 0 ? $skaiSourceBatchRunId : null),
-    'source_batch_type'      => ($skaiSourceBatchType !== '' ? $skaiSourceBatchType : (!empty($skaiBatchTracking) ? 'SKAI Precision Lock Batch' : null)),
-    'source_batch_run_order' => ($skaiSourceBatchRunOrder > 0 ? $skaiSourceBatchRunOrder : null),
-    'source_batch_origin'    => ($skaiSourceBatchOrigin !== '' ? $skaiSourceBatchOrigin : (!empty($skaiBatchTracking) ? 'mle_precision_lock_batch' : null)),
-    'batch_control_flag'     => ($skaiBatchControlFlag ? 1 : 0),
-    'source_batch_test_variable' => ($skaiBatchTestVariable !== '' ? $skaiBatchTestVariable : null),
-    'source_batch_test_value'    => ($skaiBatchTestValue !== '' ? $skaiBatchTestValue : null),
+    'source_batch_id'        => ($skaiHasRealBatchIdentity ? $skaiSourceBatchId : null),
+    'source_batch_run_id'    => ($skaiHasRealBatchIdentity && $skaiSourceBatchRunId > 0 ? $skaiSourceBatchRunId : null),
+    'source_batch_type'      => ($skaiHasRealBatchIdentity ? ($skaiSourceBatchType !== '' ? $skaiSourceBatchType : 'SKAI Precision Lock Batch') : null),
+    'source_batch_run_order' => ($skaiHasRealBatchIdentity ? $skaiSourceBatchRunOrder : null),
+    'source_batch_origin'    => ($skaiHasRealBatchIdentity ? $skaiBatchOriginSource : null),
+    'batch_control_flag'     => ($skaiHasRealBatchIdentity && $skaiBatchControlFlag ? 1 : 0),
+    'source_batch_test_variable' => ($skaiHasRealBatchIdentity && $skaiBatchTestVariable !== '' ? $skaiBatchTestVariable : null),
+    'source_batch_test_value'    => ($skaiHasRealBatchIdentity && $skaiBatchTestValue !== '' ? $skaiBatchTestValue : null),
 
     'top_combos_json'     => $evidenceJson, // may be NULL if malformed earlier
     'date_saved'          => $nowSql,

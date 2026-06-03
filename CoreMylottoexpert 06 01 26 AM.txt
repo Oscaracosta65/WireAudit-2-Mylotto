@@ -29302,6 +29302,9 @@ if ($__savePredictionAsPlay > 0) {
         if (!empty($__srcRow)) {
             $__srcMain = mylottoexpertParseNumberCsv($__srcRow['main_numbers'] ?? '', true);
             if (!empty($__srcMain)) {
+                $__playOriginSource = strtolower(trim((string)($__srcRow['source'] ?? $__srcRow['origin_source'] ?? 'skai_prediction')));
+                $__playOriginSource = preg_replace('/[^a-z0-9_\-]/', '', $__playOriginSource);
+                if ($__playOriginSource === '') { $__playOriginSource = 'skai_prediction'; }
                 $__playInsert = $__srcRow;
                 unset($__playInsert['id']);
                 $__playInsert['source'] = 'strategy_set';
@@ -29311,18 +29314,35 @@ if ($__savePredictionAsPlay > 0) {
                     ? (trim((string)$__srcRow['label']) . ' - Play')
                     : ('Play Set - ' . date('Y-m-d H:i'));
                 $__playInsert['save_intent'] = 'play_set';
-                $__playInsert['origin_source'] = 'skai_prediction';
+                $__playInsert['origin_source'] = $__playOriginSource;
                 $__playInsert['play_status'] = 'ready';
                 $__playInsert['user_editable'] = 1;
                 $__playInsert['wheel_export_count'] = 0;
                 $__playInsert['wheel_exported_at'] = null;
                 $__playInsert['is_favorite_play'] = 0;
                 $__playInsert['play_notes'] = null;
+                $__playInsert['evaluation_status'] = null;
+                $__playInsert['batch_uuid'] = null;
+                $__playInsert['batch_index'] = null;
+                $__playInsert['batch_total'] = null;
                 $__playInsert['source_batch_id'] = null;
                 $__playInsert['source_batch_run_id'] = null;
                 $__playInsert['source_batch_run_order'] = null;
+                $__playInsert['source_batch_type'] = null;
+                $__playInsert['source_batch_origin'] = null;
+                $__playInsert['batch_control_flag'] = 0;
+                $__playInsert['source_batch_test_variable'] = null;
+                $__playInsert['source_batch_test_value'] = null;
+                $__playInsert['hive_learning_contract_version'] = null;
+                $__playInsert['hive_queue_id'] = null;
+                $__playInsert['hive_assignment_id'] = null;
+                $__playInsert['hive_research_type'] = null;
+                $__playInsert['hive_setting_key'] = null;
+                $__playInsert['hive_settings_fingerprint'] = null;
                 $__playInsert['hive_contract_status'] = null;
                 $__playInsert['hive_intake_mode'] = null;
+                $__playInsert['hive_contract_json'] = null;
+                $__playInsert['hive_contract_missing_json'] = null;
 
                 $__cols = array();
                 $__vals = array();
@@ -29415,6 +29435,28 @@ if ($__duplicatePlayEntry > 0) {
             $__dupRow['generated_at'] = date('Y-m-d H:i:s');
             if (in_array('wheel_export_count', $__actionSnCols, true)) { $__dupRow['wheel_export_count'] = 0; }
             if (in_array('wheel_exported_at', $__actionSnCols, true)) { $__dupRow['wheel_exported_at'] = null; }
+            $__dupRow['evaluation_status'] = null;
+            $__dupRow['batch_uuid'] = null;
+            $__dupRow['batch_index'] = null;
+            $__dupRow['batch_total'] = null;
+            $__dupRow['source_batch_id'] = null;
+            $__dupRow['source_batch_run_id'] = null;
+            $__dupRow['source_batch_run_order'] = null;
+            $__dupRow['source_batch_type'] = null;
+            $__dupRow['source_batch_origin'] = null;
+            $__dupRow['batch_control_flag'] = 0;
+            $__dupRow['source_batch_test_variable'] = null;
+            $__dupRow['source_batch_test_value'] = null;
+            $__dupRow['hive_learning_contract_version'] = null;
+            $__dupRow['hive_queue_id'] = null;
+            $__dupRow['hive_assignment_id'] = null;
+            $__dupRow['hive_research_type'] = null;
+            $__dupRow['hive_setting_key'] = null;
+            $__dupRow['hive_settings_fingerprint'] = null;
+            $__dupRow['hive_contract_status'] = null;
+            $__dupRow['hive_intake_mode'] = null;
+            $__dupRow['hive_contract_json'] = null;
+            $__dupRow['hive_contract_missing_json'] = null;
 
             $__cols = array();
             $__vals = array();
