@@ -16815,6 +16815,66 @@ if ($skaiHasRealBatchIdentity) {
     ];
 }
 
+// [[SKAI_BATCH_IDENTITY_DEMOTION_GUARD_2026_06_03]]
+// Outside explicit batch-save mode, do not trust posted batch identity unless it
+// resolves to a valid header + run row with matching lottery context. Invalid
+// identity is demoted to a normal manual SKAI save so it cannot pollute tracked
+// batch evidence while still allowing the prediction save itself.
+if (!$skaiBatchSaveMode && $skaiHasRealBatchIdentity) {
+    $skaiBatchIdentityFail = '';
+    $skaiHeaderLotteryIdForDemotion = 0;
+    $skaiSavedLotteryIdForDemotion = (int)$lotteryId;
+    $skaiTargetLotteryIdForDemotion = (int)($predictionTarget['target_lottery_id'] ?? 0);
+    try {
+        $skaiMleHeaderQ = $db->getQuery(true)
+            ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
+            ->from($db->quoteName('#__mle_skai_batch_header'))
+            ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchId)
+            ->setLimit(1);
+        $db->setQuery($skaiMleHeaderQ);
+        $skaiMleHeaderRow = $db->loadAssoc();
+        if (!is_array($skaiMleHeaderRow) || empty($skaiMleHeaderRow)) {
+            $skaiBatchIdentityFail = 'batch_context_missing';
+        } else {
+            $skaiHeaderLotteryIdForDemotion = (int)($skaiMleHeaderRow['lottery_id'] ?? 0);
+            if (
+                $skaiHeaderLotteryIdForDemotion <= 0
+                || ($skaiSavedLotteryIdForDemotion > 0 && $skaiSavedLotteryIdForDemotion !== $skaiHeaderLotteryIdForDemotion)
+                || ($skaiTargetLotteryIdForDemotion > 0 && $skaiTargetLotteryIdForDemotion !== $skaiHeaderLotteryIdForDemotion)
+            ) {
+                $skaiBatchIdentityFail = 'batch_lottery_mismatch';
+            } else {
+                $skaiMleRunQ = $db->getQuery(true)
+                    ->select($db->quoteName('id'))
+                    ->from($db->quoteName('#__mle_skai_batch_run'))
+                    ->where($db->quoteName('batch_id') . ' = ' . (int)$skaiSourceBatchId)
+                    ->where($db->quoteName('run_order') . ' = ' . (int)$skaiSourceBatchRunOrder)
+                    ->order($db->quoteName('id') . ' DESC')
+                    ->setLimit(1);
+                $db->setQuery($skaiMleRunQ);
+                $skaiMleRunIdForDemotion = (int)$db->loadResult();
+                if ($skaiMleRunIdForDemotion <= 0) {
+                    $skaiBatchIdentityFail = 'batch_run_missing';
+                }
+            }
+        }
+    } catch (\Throwable $__skaiBatchIdentityEx) {
+        $skaiBatchIdentityFail = 'batch_context_missing';
+    }
+    if ($skaiBatchIdentityFail !== '') {
+        skai_debug_log('[SKAI BATCH IDENTITY DEMOTED] reason=' . $skaiBatchIdentityFail . ' uid=' . (int)$user->id . ' batch_id=' . (int)$skaiSourceBatchId . ' run_order=' . (int)$skaiSourceBatchRunOrder . ' saved_lottery_id=' . (int)$skaiSavedLotteryIdForDemotion . ' target_lottery_id=' . (int)$skaiTargetLotteryIdForDemotion . ' header_lottery_id=' . (int)$skaiHeaderLotteryIdForDemotion);
+        $skaiHasRealBatchIdentity = false;
+        $skaiSourceBatchId = 0;
+        $skaiSourceBatchRunId = 0;
+        $skaiSourceBatchRunOrder = 0;
+        $skaiBatchControlFlag = 0;
+        $skaiSourceBatchType = '';
+        $skaiSourceBatchOrigin = '';
+        $skaiBatchOriginSource = 'skai';
+        $skaiBatchTracking = [];
+    }
+}
+
 // [[SKAI_V122_HIVE_LEARNING_CONTRACT]] Canonical learning envelope for every SKAI save.
 // This captures enough identity/settings/target metadata for the hive to track all future
 // SKAI runs, whether they were launched by MyLottoExpert or manually from SKAI.
