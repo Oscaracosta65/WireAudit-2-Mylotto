@@ -10840,12 +10840,19 @@ if (!function_exists('mylottoexpertV169RenderBatchRecoveryManager')) {
               #mle-v169-batch-recovery-manager .mle-v169-status--ready{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;}
               #mle-v169-batch-recovery-manager .mle-v169-status--partial{background:#fffbeb;color:#b45309;border-color:#fde68a;}
               #mle-v169-batch-recovery-manager .mle-v169-status--failed{background:#fef2f2;color:#b91c1c;border-color:#fecaca;}
+              #mle-v169-batch-recovery-manager .mle-v169-status--abandoned{background:#fef9c3;color:#854d0e;border-color:#fde047;}
+              #mle-v169-batch-recovery-manager .mle-v169-status--completed{background:#f0fdf4;color:#166534;border-color:#bbf7d0;}
               #mle-v169-batch-recovery-manager table{width:100%;border-collapse:collapse;font-size:12px;}
               #mle-v169-batch-recovery-manager th,#mle-v169-batch-recovery-manager td{padding:7px 8px;border-bottom:1px solid #ede9fe;text-align:left;vertical-align:top;}
               #mle-v169-batch-recovery-manager thead th{background:#faf5ff;color:#581c87;font-weight:800;position:sticky;top:0;}
               #mle-v169-batch-recovery-manager .mle-v169-open-link{display:inline-flex;align-items:center;justify-content:center;padding:.46rem .72rem;border-radius:8px;background:#581c87;color:#fff;text-decoration:none;font-weight:700;white-space:nowrap;}
               #mle-v169-batch-recovery-manager .mle-v169-open-link:hover{background:#6d28d9;color:#fff;}
               #mle-v169-batch-recovery-manager .mle-v169-muted{color:#6b7280;}
+              #mle-v169-batch-recovery-manager .mle-v169-action-btn{display:inline-block;padding:.28rem .55rem;border-radius:6px;font-size:11px;font-weight:700;border:1px solid #d1d5db;background:#f9fafb;color:#374151;cursor:pointer;white-space:nowrap;margin:.15rem .1rem 0 0;}
+              #mle-v169-batch-recovery-manager .mle-v169-action-btn--cancel{border-color:#fca5a5;background:#fff1f2;color:#991b1b;}
+              #mle-v169-batch-recovery-manager .mle-v169-action-btn--abandon{border-color:#fde68a;background:#fffbeb;color:#78350f;}
+              #mle-v169-batch-recovery-manager .mle-v169-action-btn--delete{border-color:#ef4444;background:#fef2f2;color:#7f1d1d;}
+              #mle-v169-batch-recovery-manager .mle-v169-action-form{display:inline;}
             </style>
             <p class="mle-v123-section-note">This admin-safe recovery view lists recent 9-run SKAI batches that are not fully healthy yet. Open in SKAI uses the batch header lottery_id plus the best available game_id from batch JSON first, then lottery metadata.</p>
             <div class="mle-v123-kpi-grid" style="margin-top:1rem;">
@@ -10868,6 +10875,7 @@ if (!function_exists('mylottoexpertV169RenderBatchRecoveryManager')) {
                     <th>lottery_name</th>
                     <th>batch_type</th>
                     <th>header status</th>
+                    <th>lifecycle</th>
                     <th>created_at</th>
                     <th>run row count</th>
                     <th>generated run count</th>
@@ -10882,29 +10890,44 @@ if (!function_exists('mylottoexpertV169RenderBatchRecoveryManager')) {
                 <tbody>
                   <?php if (empty($items)): ?>
                     <tr>
-                      <td colspan="15">No recovery candidates were found in the recent batch window.</td>
+                      <td colspan="16">No recovery candidates were found in the recent batch window.</td>
                     </tr>
                   <?php else: ?>
                     <?php foreach ($items as $item): ?>
                       <?php
-                        $status = strtolower(trim((string)($item['_computed_status'] ?? ($item['status'] ?? 'pending'))));
-                        $statusCss = 'mle-v169-status';
-                        if ($status === 'failed') { $statusCss .= ' mle-v169-status--failed'; }
-                        elseif (!empty($item['_is_in_progress'])) { $statusCss .= ' mle-v169-status--partial'; }
-                        else { $statusCss .= ' mle-v169-status--ready'; }
+                        $__recStatus = strtolower(trim((string)($item['_computed_status'] ?? ($item['status'] ?? 'pending'))));
+                        $__recLifecycle = strtolower(trim((string)($item['_lifecycle'] ?? 'UNKNOWN')));
+                        $__recStatusCss = 'mle-v169-status';
+                        if ($__recStatus === 'failed') { $__recStatusCss .= ' mle-v169-status--failed'; }
+                        elseif (!empty($item['_is_in_progress'])) { $__recStatusCss .= ' mle-v169-status--partial'; }
+                        else { $__recStatusCss .= ' mle-v169-status--ready'; }
+                        $__recLifecycleCss = 'mle-v169-status';
+                        if ($__recLifecycle === 'ready') { $__recLifecycleCss .= ' mle-v169-status--ready'; }
+                        elseif (in_array($__recLifecycle, array('abandoned', 'partial_abandoned'), true)) { $__recLifecycleCss .= ' mle-v169-status--abandoned'; }
+                        elseif ($__recLifecycle === 'completed') { $__recLifecycleCss .= ' mle-v169-status--completed'; }
+                        elseif ($__recLifecycle === 'partial') { $__recLifecycleCss .= ' mle-v169-status--partial'; }
+                        elseif ($__recLifecycle === 'failed' || $__recLifecycle === 'cancelled_or_invalid') { $__recLifecycleCss .= ' mle-v169-status--failed'; }
+                        $__recBatchId = (int)($item['id'] ?? 0);
+                        $__recLotteryId = (int)($item['lottery_id'] ?? 0);
+                        $__recSavedCount = (int)($item['saved_row_count'] ?? 0);
+                        $__recIsEmpty = ($__recSavedCount === 0);
+                        $__recIsPartial = ($__recSavedCount >= 1 && $__recSavedCount <= 8);
+                        $__recFormBase = \Joomla\CMS\Uri\Uri::getInstance()->toString(array('scheme','host','port','path','query'));
+                        $__recToken = \Joomla\CMS\HTML\HTMLHelper::_('form.token');
                       ?>
                       <tr>
-                        <td><?php echo (int)($item['id'] ?? 0); ?></td>
+                        <td><?php echo $__recBatchId; ?></td>
                         <td><?php echo (int)($item['user_id'] ?? 0); ?></td>
-                        <td><?php echo (int)($item['lottery_id'] ?? 0); ?></td>
+                        <td><?php echo $__recLotteryId; ?></td>
                         <td><?php echo htmlspecialchars((string)($item['lottery_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
                         <td><?php echo htmlspecialchars((string)($item['batch_type'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
-                        <td><span class="<?php echo htmlspecialchars($statusCss, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string)($item['_computed_status'] ?? ($item['status'] ?? 'pending')), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                        <td><span class="<?php echo htmlspecialchars($__recStatusCss, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string)($item['_computed_status'] ?? ($item['status'] ?? 'pending')), ENT_QUOTES, 'UTF-8'); ?></span></td>
+                        <td><span class="<?php echo htmlspecialchars($__recLifecycleCss, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(strtoupper((string)($item['_lifecycle'] ?? 'UNKNOWN')), ENT_QUOTES, 'UTF-8'); ?></span></td>
                         <td><?php echo htmlspecialchars((string)($item['created_at'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
                         <td><?php echo (int)($item['run_row_count'] ?? 0); ?></td>
                         <td><?php echo (int)($item['generated_run_count'] ?? 0); ?></td>
                         <td><?php echo (int)($item['pending_run_count'] ?? 0); ?></td>
-                        <td><?php echo (int)($item['saved_row_count'] ?? 0); ?></td>
+                        <td><?php echo $__recSavedCount; ?></td>
                         <td><?php echo htmlspecialchars((string)($item['target_draw_date'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
                         <td><?php echo htmlspecialchars((string)($item['target_draw_timezone'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
                         <td><?php echo htmlspecialchars((string)($item['target_game_id'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
@@ -10912,7 +10935,44 @@ if (!function_exists('mylottoexpertV169RenderBatchRecoveryManager')) {
                           <?php if (!empty($item['open_skai_url'])): ?>
                             <a class="mle-v169-open-link" href="<?php echo htmlspecialchars((string)$item['open_skai_url'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer">Open in SKAI</a>
                           <?php else: ?>
-                            <span class="mle-v169-muted">Missing game_id context</span>
+                            <span class="mle-v169-muted">Cannot open - invalid batch context</span>
+                          <?php endif; ?>
+                          <?php if ($__recBatchId > 0 && $__recLotteryId > 0): ?>
+                            <?php if ($__recIsEmpty): ?>
+                              <form method="post" action="<?php echo htmlspecialchars($__recFormBase, ENT_QUOTES, 'UTF-8'); ?>" class="mle-v169-action-form">
+                                <?php echo $__recToken; ?>
+                                <input type="hidden" name="mle_action" value="clear_stuck_skai_batch">
+                                <input type="hidden" name="batch_id" value="<?php echo $__recBatchId; ?>">
+                                <input type="hidden" name="lottery_id" value="<?php echo $__recLotteryId; ?>">
+                                <input type="hidden" name="clear_mode" value="cancel_empty">
+                                <button type="submit" class="mle-v169-action-btn mle-v169-action-btn--cancel" onclick="return confirm('Cancel empty batch #<?php echo $__recBatchId; ?>?');">Cancel Empty Batch</button>
+                              </form>
+                              <form method="post" action="<?php echo htmlspecialchars($__recFormBase, ENT_QUOTES, 'UTF-8'); ?>" class="mle-v169-action-form">
+                                <?php echo $__recToken; ?>
+                                <input type="hidden" name="mle_action" value="clear_stuck_skai_batch">
+                                <input type="hidden" name="batch_id" value="<?php echo $__recBatchId; ?>">
+                                <input type="hidden" name="lottery_id" value="<?php echo $__recLotteryId; ?>">
+                                <input type="hidden" name="clear_mode" value="abandon_empty">
+                                <button type="submit" class="mle-v169-action-btn mle-v169-action-btn--abandon" onclick="return confirm('Mark batch #<?php echo $__recBatchId; ?> as abandoned?');">Mark Abandoned</button>
+                              </form>
+                              <form method="post" action="<?php echo htmlspecialchars($__recFormBase, ENT_QUOTES, 'UTF-8'); ?>" class="mle-v169-action-form">
+                                <?php echo $__recToken; ?>
+                                <input type="hidden" name="mle_action" value="clear_stuck_skai_batch">
+                                <input type="hidden" name="batch_id" value="<?php echo $__recBatchId; ?>">
+                                <input type="hidden" name="lottery_id" value="<?php echo $__recLotteryId; ?>">
+                                <input type="hidden" name="clear_mode" value="hard_delete_empty_admin_only">
+                                <button type="submit" class="mle-v169-action-btn mle-v169-action-btn--delete" onclick="return confirm('HARD DELETE batch #<?php echo $__recBatchId; ?>? This cannot be undone.');">Hard Delete Empty Batch</button>
+                              </form>
+                            <?php elseif ($__recIsPartial): ?>
+                              <form method="post" action="<?php echo htmlspecialchars($__recFormBase, ENT_QUOTES, 'UTF-8'); ?>" class="mle-v169-action-form">
+                                <?php echo $__recToken; ?>
+                                <input type="hidden" name="mle_action" value="clear_stuck_skai_batch">
+                                <input type="hidden" name="batch_id" value="<?php echo $__recBatchId; ?>">
+                                <input type="hidden" name="lottery_id" value="<?php echo $__recLotteryId; ?>">
+                                <input type="hidden" name="clear_mode" value="abandon_partial">
+                                <button type="submit" class="mle-v169-action-btn mle-v169-action-btn--abandon" onclick="return confirm('Mark batch #<?php echo $__recBatchId; ?> as partial abandoned? Saved rows are preserved.');">Mark Partial Abandoned</button>
+                              </form>
+                            <?php endif; ?>
                           <?php endif; ?>
                         </td>
                       </tr>
@@ -25175,6 +25235,62 @@ function mylottoexpertLoadBatchRunsForReview($db, $batchId, $userId, $lotteryId)
     return $rows;
 }
 
+if (!function_exists('mylottoexpertSkaiBatchTerminalStatuses')) {
+    function mylottoexpertSkaiBatchTerminalStatuses()
+    {
+        return array('cancelled', 'abandoned', 'partial_abandoned', 'completed', 'contaminated_duplicate', 'invalid', 'failed', 'archived', 'deleted', 'stale_cancelled');
+    }
+}
+
+if (!function_exists('mylottoexpertClassifySkaiBatchLifecycle')) {
+    function mylottoexpertClassifySkaiBatchLifecycle($headerRow, $runCount, $generatedCount, $pendingCount, $savedCount, $targetDrawDate, $createdAt = '')
+    {
+        $runCount       = (int)$runCount;
+        $savedCount     = (int)$savedCount;
+        $headerStatus   = strtolower(trim((string)($headerRow['status'] ?? '')));
+        $staleThresholdHours = 24;
+
+        if (function_exists('mylottoexpertSkaiBatchTerminalStatuses') && in_array($headerStatus, mylottoexpertSkaiBatchTerminalStatuses(), true)) {
+            return 'CANCELLED_OR_INVALID';
+        }
+
+        if ($runCount !== 9) {
+            return 'INVALID_RUN_COUNT';
+        }
+
+        if ($savedCount > 9) {
+            return 'CONTAMINATED_DUPLICATE';
+        }
+
+        if ($savedCount >= 9) {
+            return 'COMPLETED';
+        }
+
+        $now = time();
+        $isStale = false;
+        $targetDrawDate = trim((string)$targetDrawDate);
+        if ($targetDrawDate !== '' && preg_match('/^(\d{4}-\d{2}-\d{2})/', $targetDrawDate, $m)) {
+            $drawTs = strtotime($m[1] . ' 23:59:59');
+            if ($drawTs !== false && $drawTs < $now) {
+                $isStale = true;
+            }
+        } elseif ($targetDrawDate === '' && $createdAt !== '') {
+            $createdTs = strtotime((string)$createdAt);
+            if ($createdTs !== false && ($now - $createdTs) > ($staleThresholdHours * 3600)) {
+                if ($savedCount === 0 && in_array($headerStatus, array('pending', 'open', 'active', ''), true)) {
+                    $isStale = true;
+                }
+            }
+        }
+
+        if ($savedCount >= 1 && $savedCount <= 8) {
+            return $isStale ? 'PARTIAL_ABANDONED' : 'PARTIAL';
+        }
+
+        return $isStale ? 'ABANDONED' : 'READY';
+    }
+}
+
 function mylottoexpertCountGeneratedPrecisionBatchSaves($db, $userId, $lotteryId, $batchId)
 {
     $userId = (int)$userId;
@@ -25497,7 +25613,10 @@ if (!function_exists('mylottoexpertLoadAdminBatchRecoveryRows')) {
                 $q->join('LEFT', $db->quoteName('#__lotteries', 'l') . ' ON l.' . $db->quoteName('lottery_id') . ' = h.' . $db->quoteName('lottery_id'));
             }
             if (in_array('status', $headerCols, true)) {
-                $q->where('(h.' . $db->quoteName('status') . ' IS NULL OR h.' . $db->quoteName('status') . ' NOT IN (' . $db->quote('completed') . ',' . $db->quote('scored') . '))');
+                $__recoveryExcluded = array('completed', 'scored', 'cancelled', 'abandoned', 'partial_abandoned', 'archived', 'deleted', 'stale_cancelled');
+                $__recoveryExcludedQuoted = array_map(array($db, 'quote'), $__recoveryExcluded);
+                $q->where('(h.' . $db->quoteName('status') . ' IS NULL OR h.' . $db->quoteName('status') . ' NOT IN (' . implode(',', $__recoveryExcludedQuoted) . '))');
+                unset($__recoveryExcluded, $__recoveryExcludedQuoted);
             }
             if (in_array('created_at', $headerCols, true)) {
                 $q->order('h.' . $db->quoteName('created_at') . ' DESC');
@@ -25613,6 +25732,28 @@ function mylottoexpertReconcilePrecisionBatchStatus($db, $userId, $lotteryId, ar
     $header['_is_not_started'] = in_array($computedStatus, array('pending', 'ready'), true) && $effectiveGeneratedCount === 0;
     $header['_is_in_progress'] = ($computedStatus === 'partially_generated') || ($effectiveGeneratedCount > 0 && $effectiveGeneratedCount < 9);
     $header['_is_generated'] = in_array($computedStatus, array('generated', 'completed', 'scored'), true) || $effectiveGeneratedCount >= 9;
+    $header['_lifecycle'] = 'UNKNOWN';
+    if (function_exists('mylottoexpertClassifySkaiBatchLifecycle')) {
+        $__runMetaForLifecycle = function_exists('mylottoexpertBatchRecoveryResolveRunMeta')
+            ? mylottoexpertBatchRecoveryResolveRunMeta($runs, array())
+            : array('target_draw_date' => '');
+        $header['_lifecycle'] = mylottoexpertClassifySkaiBatchLifecycle(
+            $header,
+            $runCount,
+            $generatedRunStatusCount,
+            max(0, $runCount - $generatedRunStatusCount),
+            $savedCount,
+            (string)($__runMetaForLifecycle['target_draw_date'] ?? ''),
+            (string)($header['created_at'] ?? '')
+        );
+        unset($__runMetaForLifecycle);
+    }
+    if (!in_array($header['_lifecycle'], array('READY'), true)) {
+        $header['_is_not_started'] = false;
+    }
+    if (!in_array($header['_lifecycle'], array('PARTIAL'), true)) {
+        $header['_is_in_progress'] = false;
+    }
 
     if ($batchId > 0 && $computedStatus !== $status) {
         try {
@@ -25667,8 +25808,13 @@ function mylottoexpertLoadPrecisionLockBatchesForLottery($db, $userId, $lotteryI
             ->select($select)
             ->from($db->quoteName('#__mle_skai_batch_header'))
             ->where($db->quoteName('user_id') . ' = ' . $userId)
-            ->where($db->quoteName('lottery_id') . ' = ' . $lotteryId)
-            ->order($db->quoteName('id') . ' DESC');
+            ->where($db->quoteName('lottery_id') . ' = ' . $lotteryId);
+        if (in_array('status', $headerCols, true) && function_exists('mylottoexpertSkaiBatchTerminalStatuses')) {
+            $__terminalQuotedLoad = array_map(array($db, 'quote'), mylottoexpertSkaiBatchTerminalStatuses());
+            $q->where($db->quoteName('status') . ' NOT IN (' . implode(',', $__terminalQuotedLoad) . ')');
+            unset($__terminalQuotedLoad);
+        }
+        $q->order($db->quoteName('id') . ' DESC');
         $db->setQuery($q, 0, 50);
         $headers = $db->loadAssocList();
     } catch (\Throwable $e) {
@@ -27974,6 +28120,152 @@ if (!function_exists('mylottoexpertCanPerformAdviceStatusAction')) {
         }
         return mylottoexpertCanUserReviewOwnSavedRun($db, $userId, $savedId);
     }
+}
+
+if ($__mleAction === 'clear_stuck_skai_batch') {
+    if ($app->input->getMethod() !== 'POST' || !\Joomla\CMS\Session\Session::checkToken('post')) {
+        $app->enqueueMessage('Session expired. Please refresh and try again.', 'warning');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    if ($workspaceUserId <= 0) {
+        $app->enqueueMessage('You must be logged in to clear a batch.', 'warning');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    $__clrBatchId   = $app->input->post->getInt('batch_id', 0);
+    $__clrLotteryId = $app->input->post->getInt('lottery_id', 0);
+    $__clrMode      = strtolower(trim((string)$app->input->post->getString('clear_mode', '')));
+    $__clrAllowedModes = array('cancel_empty', 'abandon_empty', 'abandon_partial', 'hard_delete_empty_admin_only');
+    if ($__clrBatchId <= 0 || $__clrLotteryId <= 0 || !in_array($__clrMode, $__clrAllowedModes, true)) {
+        $app->enqueueMessage('Clear batch request is missing required parameters.', 'error');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    $__clrUser = \Joomla\CMS\Factory::getUser();
+    $__clrIsAdmin = (!$__clrUser->guest && $__clrUser->authorise('core.admin'));
+    $__clrPrefix = $db->getPrefix();
+    $__clrHeaderTable = $__clrPrefix . 'mle_skai_batch_header';
+    $__clrRunTable    = $__clrPrefix . 'mle_skai_batch_run';
+    if (!mylottoexpertTableExistsByRawName($db, $__clrHeaderTable) || !mylottoexpertTableExistsByRawName($db, $__clrRunTable)) {
+        $app->enqueueMessage('Batch tables are not available.', 'error');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    try {
+        $__clrHq = $db->getQuery(true)
+            ->select('*')
+            ->from($db->quoteName('#__mle_skai_batch_header'))
+            ->where($db->quoteName('id') . ' = ' . $__clrBatchId);
+        if (!$__clrIsAdmin) {
+            $__clrHq->where($db->quoteName('user_id') . ' = ' . (int)$workspaceUserId);
+        }
+        $db->setQuery($__clrHq, 0, 1);
+        $__clrHeader = $db->loadAssoc();
+    } catch (\Throwable $e) {
+        $__clrHeader = array();
+    }
+    if (!is_array($__clrHeader) || empty($__clrHeader)) {
+        $app->enqueueMessage('Batch not found or you do not have permission to clear it.', 'error');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    if ((int)($__clrHeader['lottery_id'] ?? 0) !== $__clrLotteryId) {
+        $app->enqueueMessage('Batch lottery context mismatch. Clear action aborted.', 'error');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    $__clrBatchOwner = (int)($__clrHeader['user_id'] ?? 0);
+    if (!$__clrIsAdmin && $__clrBatchOwner !== (int)$workspaceUserId) {
+        $app->enqueueMessage('You do not have permission to clear this batch.', 'error');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    $__clrOldStatus = strtolower(trim((string)($__clrHeader['status'] ?? 'pending')));
+    if (function_exists('mylottoexpertSkaiBatchTerminalStatuses') && in_array($__clrOldStatus, mylottoexpertSkaiBatchTerminalStatuses(), true)) {
+        $app->enqueueMessage('This batch is already in a terminal status: ' . htmlspecialchars($__clrOldStatus, ENT_QUOTES, 'UTF-8') . '.', 'warning');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    $__clrSaveCounts = mylottoexpertCountGeneratedPrecisionBatchSaves($db, $__clrBatchOwner, $__clrLotteryId, $__clrBatchId);
+    $__clrSavedCount = (int)($__clrSaveCounts['saved_count'] ?? 0);
+    if ($__clrMode === 'hard_delete_empty_admin_only' && !$__clrIsAdmin) {
+        $app->enqueueMessage('Hard delete requires Super User access.', 'error');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    if (in_array($__clrMode, array('cancel_empty', 'abandon_empty', 'hard_delete_empty_admin_only'), true) && $__clrSavedCount > 0) {
+        $app->enqueueMessage('This clear mode requires saved_row_count = 0. This batch has ' . (int)$__clrSavedCount . ' saved rows. Use abandon_partial instead.', 'error');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    if ($__clrMode === 'abandon_partial' && ($__clrSavedCount < 1 || $__clrSavedCount > 8)) {
+        $app->enqueueMessage('abandon_partial requires saved_row_count between 1 and 8. Found: ' . (int)$__clrSavedCount . '.', 'error');
+        $app->redirect(\Joomla\CMS\Uri\Uri::getInstance()->toString());
+        return;
+    }
+    $__clrNewHeaderStatus = 'cancelled';
+    $__clrNewRunStatus    = 'cancelled';
+    if ($__clrMode === 'abandon_empty') {
+        $__clrNewHeaderStatus = 'abandoned';
+        $__clrNewRunStatus    = 'abandoned';
+    } elseif ($__clrMode === 'abandon_partial') {
+        $__clrNewHeaderStatus = 'partial_abandoned';
+        $__clrNewRunStatus    = 'partial_abandoned';
+    }
+    try {
+        $db->transactionStart();
+        if ($__clrMode === 'hard_delete_empty_admin_only') {
+            $db->setQuery($db->getQuery(true)->delete($db->quoteName('#__mle_skai_batch_run'))->where($db->quoteName('batch_id') . ' = ' . $__clrBatchId));
+            $db->execute();
+            $db->setQuery($db->getQuery(true)->delete($db->quoteName('#__mle_skai_batch_header'))->where($db->quoteName('id') . ' = ' . $__clrBatchId));
+            $db->execute();
+        } else {
+            $__clrHeaderCols = mylottoexpertGetTableColumnNames($db, '#__mle_skai_batch_header');
+            if (in_array('status', $__clrHeaderCols, true)) {
+                $__clrUq = $db->getQuery(true)
+                    ->update($db->quoteName('#__mle_skai_batch_header'))
+                    ->set($db->quoteName('status') . ' = ' . $db->quote($__clrNewHeaderStatus))
+                    ->where($db->quoteName('id') . ' = ' . $__clrBatchId);
+                $db->setQuery($__clrUq);
+                $db->execute();
+            }
+            $__clrRunCols = mylottoexpertGetTableColumnNames($db, '#__mle_skai_batch_run');
+            if (in_array('status', $__clrRunCols, true)) {
+                $__clrRunUq = $db->getQuery(true)
+                    ->update($db->quoteName('#__mle_skai_batch_run'))
+                    ->set($db->quoteName('status') . ' = ' . $db->quote($__clrNewRunStatus))
+                    ->where($db->quoteName('batch_id') . ' = ' . $__clrBatchId);
+                if ($__clrMode === 'abandon_partial') {
+                    $__clrRunUq->where($db->quoteName('status') . ' NOT IN (' . $db->quote('generated') . ',' . $db->quote('completed') . ',' . $db->quote('saved') . ',' . $db->quote('scored') . ')');
+                }
+                $db->setQuery($__clrRunUq);
+                $db->execute();
+            }
+        }
+        $db->transactionCommit();
+        $__clrSuccess = true;
+    } catch (\Throwable $e) {
+        try { $db->transactionRollback(); } catch (\Throwable $re) {}
+        $__clrSuccess = false;
+        error_log('[MLE BATCH RECOVERY] clear_stuck_skai_batch error: ' . $e->getMessage() . ' batch_id=' . $__clrBatchId);
+    }
+    $__clrLogEntry = date('Y-m-d H:i:s') . ' | acting_user_id=' . (int)$workspaceUserId . ' | target_batch_id=' . $__clrBatchId . ' | target_batch_user_id=' . $__clrBatchOwner . ' | lottery_id=' . $__clrLotteryId . ' | old_status=' . $__clrOldStatus . ' | new_status=' . ($__clrMode === 'hard_delete_empty_admin_only' ? 'HARD_DELETED' : $__clrNewHeaderStatus) . ' | saved_row_count=' . $__clrSavedCount . ' | action=' . $__clrMode . ' | success=' . ($__clrSuccess ? '1' : '0') . "\n";
+    $__clrLogFile = JPATH_ADMINISTRATOR . '/logs/mylottoexpert_batch_recovery.log';
+    @file_put_contents($__clrLogFile, $__clrLogEntry, FILE_APPEND | LOCK_EX);
+    if ($__clrSuccess) {
+        $__clrModeLabel = array('cancel_empty' => 'cancelled', 'abandon_empty' => 'marked abandoned', 'abandon_partial' => 'marked partial abandoned', 'hard_delete_empty_admin_only' => 'hard deleted');
+        $app->enqueueMessage('Batch #' . $__clrBatchId . ' was ' . ($__clrModeLabel[$__clrMode] ?? 'cleared') . ' successfully.', 'message');
+    } else {
+        $app->enqueueMessage('Batch #' . $__clrBatchId . ' could not be cleared due to a database error. See site error log for details.', 'error');
+    }
+    $__clrRedirect = \Joomla\CMS\Uri\Uri::getInstance();
+    $__clrRedirect->delVar('mle_action');
+    $__clrRedirect->delVar('batch_id');
+    $__clrRedirect->delVar('lottery_id');
+    $__clrRedirect->delVar('clear_mode');
+    $app->redirect((string)$__clrRedirect);
+    return;
 }
 
 if ($__mleAction === 'update_advice_status') {
