@@ -15396,7 +15396,7 @@ try {
 $allowedGroups    = [14, 8];
 $userGroups       = $user->groups ?? [];
 $skaiCanAdminSave = !$user->guest && $user->authorise('core.admin');
-$isMember         = $skaiCanAdminSave || (bool) array_intersect($allowedGroups, $userGroups);
+$isMember         = (!$user->guest && ($skaiCanAdminSave || (bool) array_intersect($allowedGroups, $userGroups)));
 
 if (!$isMember) {
     if ($skaiBatchSaveMode) {
@@ -16584,6 +16584,27 @@ $labelInput = implode(' - ', $parts);
         $skaiCanFallbackByRunId  = (!$skaiCanLookupByBatchRun && $skaiSourceBatchRunId > 0);
         if ($skaiCanLookupByBatchRun || $skaiCanFallbackByRunId) {
             try {
+                if ($skaiSourceBatchIdForTarget > 0) {
+                    $skaiHeaderOwnerQ = $db->getQuery(true)
+                        ->select($db->quoteName('id'))
+                        ->from($db->quoteName('#__mle_skai_batch_header'))
+                        ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchIdForTarget)
+                        ->where($db->quoteName('user_id') . ' = ' . (int)$user->id)
+                        ->setLimit(1);
+                    $db->setQuery($skaiHeaderOwnerQ);
+                    $skaiHeaderOwnerId = (int)$db->loadResult();
+                    if ($skaiHeaderOwnerId <= 0) {
+                        $skaiCanLookupByBatchRun = false;
+                        $skaiCanFallbackByRunId = false;
+                    }
+                }
+            } catch (\Throwable $__skaiBatchOwnerGuardEx) {
+                $skaiCanLookupByBatchRun = false;
+                $skaiCanFallbackByRunId = false;
+            }
+        }
+        if ($skaiCanLookupByBatchRun || $skaiCanFallbackByRunId) {
+            try {
                 $skaiRunTables = array_map('strtolower', array_keys((array)$db->getTableList()));
                 $skaiRunTable  = strtolower(str_replace('#__', $db->getPrefix(), '#__mle_skai_batch_run'));
                 if (in_array($skaiRunTable, $skaiRunTables, true)) {
@@ -16830,6 +16851,7 @@ if (!$skaiBatchSaveMode && $skaiHasRealBatchIdentity) {
             ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
             ->from($db->quoteName('#__mle_skai_batch_header'))
             ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchId)
+            ->where($db->quoteName('user_id') . ' = ' . (int)$user->id)
             ->setLimit(1);
         $db->setQuery($skaiMleHeaderQ);
         $skaiMleHeaderRow = $db->loadAssoc();
@@ -17438,6 +17460,7 @@ $row = (object) [
                         ->select(array($db->quoteName('id'), $db->quoteName('lottery_id')))
                         ->from($db->quoteName('#__mle_skai_batch_header'))
                         ->where($db->quoteName('id') . ' = ' . (int)$skaiSourceBatchId)
+                        ->where($db->quoteName('user_id') . ' = ' . (int)$user->id)
                         ->setLimit(1);
                     $db->setQuery($skaiMleHeaderQ);
                     $skaiMleHeaderRow = $db->loadAssoc();
