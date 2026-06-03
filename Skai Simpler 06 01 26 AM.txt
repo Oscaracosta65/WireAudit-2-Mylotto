@@ -17460,6 +17460,43 @@ $row = (object) [
                 $data['lottery_id'] = (int)($row->lottery_id ?? 0);
             }
 
+            // [[SKAI_MLE_BATCH_SAVE_DUPLICATE_GUARD_2026_06_03]]
+            // Browser retries / interrupted responses can replay the same batch save payload.
+            // Prevent duplicate inserts by reusing an existing row identity in batch mode.
+            if ($skaiBatchSaveMode) {
+                $skaiDupUserId = (int)($data['user_id'] ?? $user->id);
+                $skaiDupBatchId = (int)($data['source_batch_id'] ?? 0);
+                $skaiDupRunOrder = (int)($data['source_batch_run_order'] ?? 0);
+                if ($skaiDupUserId > 0 && $skaiDupBatchId > 0 && $skaiDupRunOrder > 0) {
+                    try {
+                        $skaiDupQ = $db->getQuery(true)
+                            ->select($db->quoteName('id'))
+                            ->from($db->quoteName('#__user_saved_numbers'))
+                            ->where($db->quoteName('user_id') . ' = ' . (int)$skaiDupUserId)
+                            ->where($db->quoteName('source_batch_id') . ' = ' . (int)$skaiDupBatchId)
+                            ->where($db->quoteName('source_batch_run_order') . ' = ' . (int)$skaiDupRunOrder)
+                            ->order($db->quoteName('id') . ' DESC')
+                            ->setLimit(1);
+                        $db->setQuery($skaiDupQ);
+                        $skaiDupSavedRowId = (int)$db->loadResult();
+                        if ($skaiDupSavedRowId > 0) {
+                            skai_debug_log('[SKAI BATCH SAVE DUPLICATE] user_id=' . (int)$skaiDupUserId . ' batch_id=' . (int)$skaiDupBatchId . ' run_order=' . (int)$skaiDupRunOrder . ' existing_row_id=' . (int)$skaiDupSavedRowId);
+                            $skaiRespondBatchJson(true, [
+                                'row_id' => (int)$skaiDupSavedRowId,
+                                'duplicate_guard' => 1,
+                                'reason' => 'duplicate_batch_run',
+                                'message' => 'Batch run already saved; existing row returned.',
+                                'batch_index' => (int)$skaiBatchSaveIndex,
+                                'batch_total' => (int)$skaiBatchSaveTotal,
+                                'batch_label' => (string)$skaiBatchSaveLabel
+                            ]);
+                        }
+                    } catch (\Throwable $__skaiBatchDupEx) {
+                        skai_debug_log('[SKAI BATCH SAVE DUPLICATE CHECK] non-fatal error: ' . $__skaiBatchDupEx->getMessage());
+                    }
+                }
+            }
+
             // Normalize JSON-capable fields (encode arrays/objects)
             // [CHANGE] JSON-encode complex fields; keeps strings as-is if already encoded.
             $jsonFields = [
